@@ -16,7 +16,7 @@
 
 ### Sharing it
 
-- **The HTML file alone** can be emailed or put on any web page (GitHub Pages works). It needs nothing else, but without the service it shows only the stored WaterTAP solutions above.
+- **The HTML file alone** can be emailed or put on any web page. It needs nothing else, but without the service it shows only the stored WaterTAP solutions above. With GitHub Pages turned on for this repository (Settings → Pages → `main`, root folder), the page is at `https://siscanalysis.github.io/opennn-watertap-demo/to_show/water_treatment_hmi.html`. Wherever the page is opened from, it looks for the service on the viewer's own computer, so a viewer who runs `start_simulator.bat` gets the live simulator there too.
 - **The live simulator** cannot travel in one file. WaterTAP needs Python, Pyomo/IDAES and the IPOPT solver, about 800 MB, and browsers cannot run IPOPT. To run it elsewhere, copy the whole `water_treatment` folder (the service imports `..\ro_flowsheet.py` and `..\bsm2_steady\bsm2_flowsheet.py`), create the conda environment and run `start_simulator.bat`. Alternatively, run the service once on a server and point the page at it.
 
 The `WATERTAP` chip in the top bar says whether the simulator is offline, starting, live or solving.
