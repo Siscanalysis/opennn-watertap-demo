@@ -1094,10 +1094,12 @@ if (typeof module !== "undefined") module.exports = solveOptimum;
 
   // ------------------------------------------------------------------ WaterTAP simulator service
 
-  // Served by the service itself, the page talks to its own origin; opened as a file, it looks for
-  // the service on this machine. Results are cached per operating point.
+  // Served by the service itself, the page talks to its own origin; opened as a file or from any
+  // other site (GitHub Pages, for one), it looks for the service on the viewer's own computer.
+  // Results are cached per operating point.
   const SIM = {
-    base: /^https?:$/.test(location.protocol) ? "" : "http://127.0.0.1:8765",
+    base: /^https?:$/.test(location.protocol) && ["127.0.0.1", "localhost"].includes(location.hostname)
+      ? "" : "http://127.0.0.1:8765",
     online: false, status: null, results: new Map(), pending: new Set(), lastPlant: {}, live: 0,
     seq: 0, prefetchSent: {}, prefetchAt: 0,
   };
