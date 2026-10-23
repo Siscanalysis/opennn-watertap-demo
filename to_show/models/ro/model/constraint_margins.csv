@@ -1,0 +1,5 @@
+output,bound,samples,margin
+permeate_ppm,500,147,8.0124207
+flux_out,1,59,0.89571702
+flux_avg,20,197,0.31678772
+lcow,0.41999999,234,0.0030973554

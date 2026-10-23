@@ -1,0 +1,13 @@
+subset,samples,output,network,r2,mae
+all,87,lcow,original,0.989764,0.001086
+all,87,lcow,retrained,0.99596,0.000904256
+all,87,sec,original,0.999781,0.00397125
+all,87,sec,retrained,0.999885,0.00322932
+all,87,permeate_ppm,original,0.999306,2.10425
+all,87,permeate_ppm,retrained,0.999123,2.35932
+all,87,flux_out,original,0.999141,0.243773
+all,87,flux_out,retrained,0.998993,0.281225
+all,87,flux_avg,original,0.999576,0.149419
+all,87,flux_avg,retrained,0.999625,0.153291
+all,87,area,original,0.996436,0.568193
+all,87,area,retrained,0.998425,0.473998

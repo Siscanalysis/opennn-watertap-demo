@@ -1,0 +1,10 @@
+dataset bsm2_dataset_infill.csv (970 rows)
+hidden_neurons 32
+test_r2_lcow 0.999697
+test_r2_sec 0.988658
+test_r2_tss 0.999578
+test_r2_cod 0.999067
+test_r2_tn 0.845544
+test_r2_bod5 0.999399
+test_r2_nh4 0.858737
+test_r2_biogas 0.99969

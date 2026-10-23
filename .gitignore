@@ -1,0 +1,17 @@
+# Build products (rebuild with model\build.bat and bsm2_steady\model\build.bat)
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+
+# Python
+__pycache__/
+*.pyc
+
+# Scratch: architecture trials (reproducible with the BSM2_* settings in to_show/README.md)
+to_show/models/bsm2_variants/
+
+# Local copies
+* - Copy*

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>OpenNN Water Treatment HMI</title>
+<meta name="description" content="Interactive control-room view of a wastewater plant and a desalination plant, driven by OpenNN neural networks running in the browser next to the WaterTAP simulator, with set-points optimized by OpenNN and checked in WaterTAP.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" media="print" onload="this.media='all'">
+<style>
+/*__STYLE__*/
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <div class="brand-name">Water Treatment HMI</div>
+        <div class="brand-sub">OpenNN neural networks in your browser, the WaterTAP simulator beside them</div>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist" aria-label="Plant">
+      <button type="button" role="tab" id="tab-bsm2" data-plant="bsm2" aria-selected="true">Wastewater plant</button>
+      <button type="button" role="tab" id="tab-ro" data-plant="ro" aria-selected="false">Desalination plant</button>
+    </nav>
+    <div class="status-strip">
+      <span class="pill" id="mode-pill">Manual</span>
+      <span class="chip" id="alarm-count">0 alarms</span>
+      <span class="chip" id="warn-count">0 near limit</span>
+      <span class="chip sim-chip" id="sim-chip">WaterTAP offline</span>
+      <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Switch colour theme">Theme</button>
+      <span class="clock num" id="clock" aria-label="Plant time">06:00</span>
+    </div>
+  </header>
+
+  <div class="banner" id="alarm-banner" role="status" aria-live="polite"></div>
+
+  <main class="layout">
+    <div class="main-col">
+      <section class="panel process" aria-labelledby="process-title">
+        <div class="panel-head">
+          <h2 id="process-title">Process</h2>
+          <div class="process-tools">
+            <span class="note" id="process-note">Values: OpenNN predictions, instant</span>
+            <div class="segmented source" role="group" aria-label="Values shown in the diagram">
+              <button type="button" id="src-nn" aria-pressed="true">OpenNN</button>
+              <button type="button" id="src-sim" aria-pressed="false">WaterTAP</button>
+            </div>
+          </div>
+        </div>
+        <div class="diagram" id="diagram"></div>
+        <div class="legend" id="legend"></div>
+      </section>
+      <section class="kpis" id="kpis" aria-label="Key performance indicators"></section>
+      <section id="proposal" aria-live="polite"></section>
+    </div>
+
+    <aside class="panel controls" aria-label="Operation">
+      <div class="block" id="disturbance-block"></div>
+      <div class="block" id="setpoint-block"></div>
+      <div class="block" id="optimizer-block"></div>
+    </aside>
+  </main>
+
+  <section class="lower">
+    <div class="panel" id="limits-panel">
+      <div class="panel-head"><h2 id="limits-title">Limits</h2><span class="note" id="limits-note"></span></div>
+      <div class="limits" id="limits"></div>
+    </div>
+    <div class="panel" id="check-panel">
+      <div class="panel-head"><h2>OpenNN and WaterTAP</h2><span class="note">This operating point</span></div>
+      <div class="check" id="check"></div>
+    </div>
+    <div class="panel" id="events-panel">
+      <div class="panel-head"><h2>Event log</h2><span class="note">Plant time</span></div>
+      <ul class="events" id="events"></ul>
+    </div>
+    <div class="panel trends" id="trends">
+      <div class="panel-head"><h2>Trends</h2>
+        <span class="note trend-key" id="trend-note">
+          <span>Last 12 plant hours</span>
+          <span class="key"><svg class="key-line" viewBox="0 0 22 10" aria-hidden="true"><line class="c-line" x1="1" y1="5" x2="21" y2="5"/></svg>OpenNN prediction</span>
+          <span class="key"><svg class="key-dot" viewBox="0 0 12 12" aria-hidden="true"><circle class="c-sim" cx="6" cy="6" r="4"/></svg>WaterTAP solution</span>
+          <span class="key trend-sim" id="trend-sim" aria-live="polite"></span>
+        </span>
+      </div>
+      <div class="trend-grid" id="trend-grid"></div>
+    </div>
+  </section>
+
+  <footer class="about" id="about"></footer>
+</div>
+
+<script id="plant-data" type="application/json">__DATA__</script>
+<script id="model-src">
+/*__MODEL__*/
+</script>
+<script id="optimizer-src">
+/*__OPTIMIZER__*/
+</script>
+<script>
+/*__APP__*/
+</script>
+</body>
+</html>

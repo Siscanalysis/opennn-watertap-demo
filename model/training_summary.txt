@@ -1,0 +1,7 @@
+hidden_neurons 32
+test_r2_lcow 0.996109
+test_r2_sec 0.999761
+test_r2_permeate_ppm 0.999197
+test_r2_flux_out 0.999339
+test_r2_flux_avg 0.999698
+test_r2_area 0.99871

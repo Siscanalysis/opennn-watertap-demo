@@ -1,0 +1,9 @@
+hidden_neurons 24
+test_r2_lcow 0.999453
+test_r2_sec 0.97376
+test_r2_tss 0.999487
+test_r2_cod 0.998875
+test_r2_tn 0.740903
+test_r2_bod5 0.999135
+test_r2_nh4 0.78352
+test_r2_biogas 0.999602

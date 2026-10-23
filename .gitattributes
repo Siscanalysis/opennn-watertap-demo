@@ -1,0 +1,2 @@
+# Windows batch files are stored as they are, with CRLF: cmd.exe mis-parses LF-only scripts.
+*.bat -text
