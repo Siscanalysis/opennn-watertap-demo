@@ -15,3 +15,8 @@ to_show/models/bsm2_variants/
 
 # Local copies
 * - Copy*
+
+# This computer's setup and sessions (setup.bat / setup.sh, the simulator service)
+.venv/
+to_show/simulator/python_path*.txt
+to_show/models/*/data/session_simulations_local.csv

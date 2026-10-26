@@ -10,14 +10,23 @@
 ## Opening it
 
 - **Network only.** Double-click `water_treatment_hmi.html`. It is a single file that runs in any modern browser, offline, with nothing installed. It carries WaterTAP's solutions for the default operations, the optima and the guided demo's paths. Every other point shows the network alone.
-- **Network and simulator.** Double-click `start_simulator.bat`. It starts a WaterTAP service on this computer and opens the page from it (`http://127.0.0.1:8765/`). From then on, every operating point that holds still for half a second, and every OpenNN proposal, is also solved in WaterTAP. The desalination models are ready in seconds and the wastewater models in a minute or two. A solve takes about 5 to 15 s (desalination) or 5 to 25 s (wastewater). The file opened directly also finds the service while it runs. Closing the window stops it.
+- **Network and simulator.** Run `..\setup.bat` once on the computer (`../setup.sh` on Linux or macOS). Then either press **Start WaterTAP** in the page, or double-click `..\start_demo.bat` (the same as `start_simulator.bat` here), which also opens the page from the service (`http://127.0.0.1:8765/`). From then on, every operating point that holds still for half a second, and every OpenNN proposal, is also solved in WaterTAP. The desalination models are ready in seconds and the wastewater models in about a minute. A solve takes about 5 to 15 s (desalination) or 5 to 25 s (wastewater). The simulator runs in its own window, minimized when the button started it; closing that window stops it.
 
-  The service needs the `watertap` conda environment described in `..\README.md`. The `.bat` looks for it in the usual conda folders, then tries `conda run`. To use another Python, set `PYTHON` before running it.
+  The service uses the Python environment that setup created; `simulator/python_path.txt` records its `python.exe`. To use another one, set `PYTHON` before running `start_simulator.bat`. Started a second time, the service only opens the page.
+
+### The Start WaterTAP button
+
+A web page cannot start a program on its own. The button opens an `opennn-watertap:` link, and `setup.bat` registers that link type for the current Windows user (`HKCU\Software\Classes\opennn-watertap`): it runs `start_simulator.bat --from-page` from the folder where setup ran. The browser asks once ("Open OpenNN WaterTAP simulator?"); Chrome and Edge can remember the answer. The page then waits for the service and turns live by itself.
+
+- Without the setup, the button does nothing, and after 15 s the page says what to run, with this folder's path when it is opened as a file.
+- The link takes no arguments, so any web page can at most start this simulator, and only after that prompt.
+- `setup.bat --uninstall` removes the registration. Moving the folder needs `setup.bat` again.
+- On Linux and macOS the page shows the commands instead of the button.
 
 ### Sharing it
 
-- **The HTML file alone** can be emailed or put on any web page. It needs nothing else, but without the service it shows only the stored WaterTAP solutions above. With GitHub Pages turned on for this repository (Settings → Pages → `main`, root folder), the page is at `https://siscanalysis.github.io/opennn-watertap-demo/to_show/water_treatment_hmi.html`. Wherever the page is opened from, it looks for the service on the viewer's own computer, so a viewer who runs `start_simulator.bat` gets the live simulator there too.
-- **The live simulator** cannot travel in one file. WaterTAP needs Python, Pyomo/IDAES and the IPOPT solver, about 800 MB, and browsers cannot run IPOPT. To run it elsewhere, copy the whole `water_treatment` folder (the service imports `..\ro_flowsheet.py` and `..\bsm2_steady\bsm2_flowsheet.py`), create the conda environment and run `start_simulator.bat`. Alternatively, run the service once on a server and point the page at it.
+- **The HTML file alone** can be emailed or put on any web page. It needs nothing else, but without the service it shows only the stored WaterTAP solutions above. With GitHub Pages turned on for this repository (Settings → Pages → `main`, root folder), the page is at `https://siscanalysis.github.io/opennn-watertap-demo/to_show/water_treatment_hmi.html`. Wherever the page is opened from, it looks for the service on the viewer's own computer, so a viewer who has run the setup gets the live simulator there too.
+- **The live simulator** cannot travel in one file. WaterTAP needs Python, Pyomo/IDAES and the IPOPT solver, about 800 MB, and browsers cannot run IPOPT. To run it elsewhere, clone or download the repository (the service imports `..\ro_flowsheet.py` and `..\bsm2_steady\bsm2_flowsheet.py`) and run `setup.bat`. Alternatively, run the service once on a server and point the page at it.
 
 The `WATERTAP` chip in the top bar says whether the simulator is offline, starting, live or solving.
 
@@ -32,10 +41,16 @@ The `WATERTAP` chip in the top bar says whether the simulator is offline, starti
 | Optimizer card | First the proposal: the set-points now and proposed, the outputs OpenNN predicts, and WaterTAP's solution at the proposed set-points with its limit check. After `Apply set-points`, the result: the plant before and after, both solved in WaterTAP, next to the change OpenNN predicted. |
 | Limits | Each effluent or product limit as a bar, with OpenNN's value (▲ below the bar) and WaterTAP's (▼ above it, orange). The shaded band is the safety margin the optimizer keeps. |
 | OpenNN and WaterTAP | Both at the current operating point, their difference, and how long each takes: about 10 to 20 µs per network prediction in the browser against seconds per WaterTAP solve, roughly a million times longer. |
-| Trends | The last 12 plant hours: the network's prediction as a line and WaterTAP's solutions as orange dots. A solution that arrives after the plant has moved on is drawn where the plant was. |
+| Trends | The last 12 plant hours: the network's prediction as a line and WaterTAP's solutions as orange dots. A solution that arrives after the plant has moved on is drawn where the plant was. In AUTO, a dotted violet line marks where the optimizer keeps an output: its limit less the safety margin (NH₄ ≤ 3.56 mg/L with the permit). |
 | Event log | Alarms, operator actions, optimizer steps and simulator results. |
 
 The tabs switch between the two plants. `Theme` cycles between system, dark and light.
+
+### Why NH₄ stays flat in AUTO
+
+Removing more ammonium takes more aeration or an older sludge, and both cost energy, money or biogas. So each optimum uses all the room the NH₄ limit allows: that limit is what stops the optimizer. AUTO therefore holds NH₄ on the dotted line (the 4 mg/L limit less the 0.44 mg/L safety margin) while the set-points and the energy follow the influent; a note under the trends says so. WaterTAP's dots scatter around the line, below the limit: that scatter is what the margin is for.
+
+With the set-points held (manual), NH₄ moves a lot along the daily pattern: from 1.1 to 5.5 mg/L for one stored default, in WaterTAP. The influent load and the sludge wastage move it most. One tank's dissolved oxygen moves it less, because the other two aerated tanks take up the work.
 
 ## Presenting it
 
@@ -45,7 +60,7 @@ The tabs switch between the two plants. `Theme` cycles between system, dark and 
 2. OpenNN proposes optimal set-points (minimum energy for the wastewater plant, minimum cost for the desalination plant), and WaterTAP checks them.
 3. The set-points are applied. The card shows the saving measured in WaterTAP next to the one OpenNN predicted, and every limit still holds.
 4. The influent follows a daily pattern (or the salinity swings) with the set-points held fixed. At high load the plant drifts toward its limits, and at low load it wastes energy.
-5. AUTO: OpenNN re-optimizes as the condition changes, and the WaterTAP dots follow the network's line.
+5. AUTO: OpenNN re-optimizes as the condition changes, and the WaterTAP dots follow the network's line. NH₄ now stays on the AUTO line while the energy follows the load.
 
 Opening the file with `#bsm2-demo` or `#ro-demo` at the end of the address starts the demo directly. `#ro` opens the desalination plant.
 
@@ -115,7 +130,9 @@ AUTO works with your limits as well: it re-optimizes for each new condition. Whe
 - `POST /prefetch` gives the points the plant is about to reach. During the daily pattern or the salinity swing, the page sends the next condition values with the set-points held (or at the optimum, in AUTO).
 - `GET /results?since=n` returns the solutions finished since the page last asked. The page pulls them every 1.5 s and draws them on the trends, at the time the plant was at that point.
 
-Checks (an OpenNN proposal, the points before and after applying it) go first, in order. Next comes the plant's current point; a newer one replaces one still waiting, so the simulator follows the operator instead of working through a backlog. Prefetched points come last. Results are cached, and the stored points are loaded at start. Every new solve is appended to `models/<plant>/data/session_simulations.csv`, so the points visited while presenting can join the next retraining.
+Checks (an OpenNN proposal, the points before and after applying it) go first, in order. Next comes the plant's current point; a newer one replaces one still waiting, so the simulator follows the operator instead of working through a backlog. Prefetched points come last. Results are cached, and the stored points are loaded at start. Every new solve is appended to `models/<plant>/data/session_simulations_local.csv` (not in Git), so the points visited while presenting can join the next retraining; `session_simulations.csv` holds those of earlier sessions that the current networks were trained with.
+
+`python simulator/server.py --check` builds both WaterTAP models, solves one point with each and exits; setup runs it.
 
 A point no one could predict, such as a slider just moved, still takes one WaterTAP solve, a few seconds. The trends show "WaterTAP solving" meanwhile.
 

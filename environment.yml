@@ -1,0 +1,11 @@
+# The Python environment of the WaterTAP simulator service and the tools. setup.bat creates it
+# (conda env create -f environment.yml) and then fetches the IDAES solvers (idaes get-extensions).
+name: watertap
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pip
+  - pip:
+      - -r requirements.txt

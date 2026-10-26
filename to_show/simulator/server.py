@@ -1,10 +1,15 @@
 """Local WaterTAP simulator service for water_treatment_hmi.html.
 
     python server.py [port] [--no-browser] [--workers-bsm2=3] [--workers-ro=2]
+    python server.py --check
 
-Serves the dashboard at http://127.0.0.1:<port>/ and solves operating points in WaterTAP:
+Serves the dashboard at http://127.0.0.1:<port>/ and solves operating points in WaterTAP. If the
+service already runs on that port, it only opens the page. --check builds both WaterTAP models,
+solves one operating point of each and exits (0 when both solve); setup.bat runs it.
 
-    GET  /status     {"ready", "warming", "error", "busy", "workers", "queued", "solved", "equations"},
+Endpoints:
+
+    GET  /status    {"ready", "warming", "error", "busy", "workers", "queued", "solved", "equations"},
                      each per plant
     POST /simulate   body {"plant": "bsm2"|"ro", "x": {input: value}, "kind": "plant"|"check"}
                      -> {"status": "ok"|"washout"|"failed"|"superseded"|"unavailable",
@@ -20,8 +25,9 @@ go first, in order; then the plant's current point, where a newer one replaces o
 (answered "superseded"), so the simulator follows the operator instead of a backlog; then the
 prefetched points. Results are cached; the points already solved for the dashboard (to_show/data)
 and in earlier sessions are loaded at start. Every new solve is appended to
-to_show/models/<plant>/data/session_simulations.csv, which tools/prepare_training.py can add to the
-training data. Runs in the "watertap" conda environment and listens on 127.0.0.1 only.
+to_show/models/<plant>/data/session_simulations_local.csv (not in Git), which
+tools/prepare_training.py adds to the training data, as it did session_simulations.csv. Runs in the
+environment setup.bat (or setup.sh) creates and listens on 127.0.0.1 only.
 """
 
 import csv
@@ -30,6 +36,7 @@ import math
 import sys
 import threading
 import time
+import urllib.request
 import webbrowser
 from collections import deque
 from concurrent.futures import ProcessPoolExecutor
@@ -126,7 +133,8 @@ class PlantService:
         self.prefetch = []
         self.running = {}
         self.cache = {}
-        self.log_path = TO_SHOW / "models" / plant / "data" / "session_simulations.csv"
+        # Solves of this computer's sessions; session_simulations.csv holds those already used in training.
+        self.log_path = TO_SHOW / "models" / plant / "data" / "session_simulations_local.csv"
         self.preload()
 
     def key(self, x):
@@ -145,12 +153,13 @@ class PlantService:
                         if row.get("status") in ("ok", "washout") and row.get(f"true_{OUTPUTS[self.plant][0]}"):
                             self.remember({v: float(row[v]) for v in INPUTS[self.plant]}, row["status"],
                                           {k: float(row[f"true_{k}"]) for k in OUTPUTS[self.plant]})
-        if self.log_path.exists():
-            with open(self.log_path, newline="") as f:
-                for row in csv.DictReader(f):
-                    if row["status"] in ("ok", "washout"):
-                        self.remember({v: float(row[v]) for v in INPUTS[self.plant]}, row["status"],
-                                      {k: float(row[k]) for k in OUTPUTS[self.plant]})
+        for path in (self.log_path.with_name("session_simulations.csv"), self.log_path):
+            if path.exists():
+                with open(path, newline="") as f:
+                    for row in csv.DictReader(f):
+                        if row["status"] in ("ok", "washout"):
+                            self.remember({v: float(row[v]) for v in INPUTS[self.plant]}, row["status"],
+                                          {k: float(row[k]) for k in OUTPUTS[self.plant]})
 
     def start(self):
         self.pool = ProcessPoolExecutor(max_workers=self.workers, initializer=_init_worker, initargs=(self.plant,))
@@ -413,20 +422,69 @@ class Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+CHECK_POINTS = {
+    "ro": {"salinity": 35.0, "recovery": 0.45, "pressure": 60.0},
+    "bsm2": {"do3": 1.7, "do4": 2.0, "do5": 1.0, "recycle": 0.6, "wastage": 0.015, "influent": 20648.0},
+}
+
+
+def self_check():
+    """Builds each WaterTAP model in this process and solves one operating point with it."""
+    passed = True
+    for plant, x in CHECK_POINTS.items():
+        start = time.time()
+        try:
+            _init_worker(plant)
+            result = _solve(x)
+        except Exception as error:
+            result = {"status": f"error ({type(error).__name__}: {error})", "outputs": None}
+        ok = result["status"] == "ok"
+        passed &= ok
+        shown = ", ".join(f"{k} {v:.4g}" for k, v in (result["outputs"] or {}).items())
+        print(f"{plant}: {'solved' if ok else result['status']} in {time.time() - start:.0f} s"
+              + (f" ({shown})" if shown else ""), flush=True)
+    print("WaterTAP check passed." if passed else "WaterTAP check FAILED.", flush=True)
+    return 0 if passed else 1
+
+
+def running_here(port):
+    """True if this service already answers on the port."""
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/status", timeout=2) as response:
+            return "ready" in json.loads(response.read())
+    except Exception:
+        return False
+
+
 def main():
+    if "--check" in sys.argv:
+        sys.exit(self_check())
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     options = dict(a[2:].split("=", 1) for a in sys.argv[1:] if a.startswith("--") and "=" in a)
     port = int(args[0]) if args else 8765
+    url = f"http://127.0.0.1:{port}/"
+    browser = "--no-browser" not in sys.argv
+    if running_here(port):
+        print(f"The WaterTAP simulator already runs on {url}", flush=True)
+        if browser:
+            webbrowser.open(url)
+        return
     workers = {"bsm2": int(options.get("workers-bsm2", 3)), "ro": int(options.get("workers-ro", 2))}
     for plant in ("ro", "bsm2"):
         SERVICES[plant] = PlantService(plant, workers[plant])
-        SERVICES[plant].start()
-    server = Server(("127.0.0.1", port), Handler)
-    url = f"http://127.0.0.1:{port}/"
+    try:
+        server = Server(("127.0.0.1", port), Handler)
+    except OSError as error:
+        print(f"Port {port} is taken by another program ({error}). Close it, or start this service on "
+              f"another port: python server.py <port> (the page looks for port 8765).", flush=True)
+        sys.exit(1)
+    for service in SERVICES.values():
+        service.start()
     print(f"WaterTAP simulator service on {url}", flush=True)
     print(f"The desalination models are ready in seconds; the wastewater models take a minute or two "
-          f"({workers['bsm2']} wastewater and {workers['ro']} desalination workers).", flush=True)
-    if "--no-browser" not in sys.argv:
+          f"({workers['bsm2']} wastewater and {workers['ro']} desalination workers). "
+          f"Close this window to stop the simulator.", flush=True)
+    if browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     try:
         server.serve_forever()

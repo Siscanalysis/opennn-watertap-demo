@@ -1,0 +1,12 @@
+# Python packages of the WaterTAP simulator service and the tools (Python 3.11 to 3.13).
+# setup.bat and setup.sh install them, then the IDAES solvers: idaes get-extensions
+watertap==1.8.0
+idaes-pse==2.13.0
+pyomo==6.10.1
+watertap-solvers==24.12.9
+parameter-sweep==0.2.0
+pint==0.24.4
+numpy==2.4.6
+scipy==1.17.1
+pandas==3.0.6
+matplotlib==3.11.2

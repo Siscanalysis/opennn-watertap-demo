@@ -2,11 +2,22 @@
 
 Neural-network surrogates of WaterTAP water-treatment flowsheets (seawater RO with pressure exchanger, BSM2 activated sludge), trained and optimized with OpenNN, with a browser control-room demo that runs the networks next to a live WaterTAP simulator.
 
-**Start here:** download [`to_show/water_treatment_hmi.html`](to_show/water_treatment_hmi.html) and open it in a browser. It is one self-contained file that runs offline. [`to_show/README.md`](to_show/README.md) explains the page, the live simulator (`to_show/start_simulator.bat`) and how the networks, optima and page are rebuilt.
-
 ![The wastewater plant: an OpenNN optimization measured in WaterTAP](to_show/screenshots/wastewater_result.png)
 
-**Requirements** for rebuilding (the page itself needs none): Windows, the `watertap` conda environment ([Setup](#setup)), and for the C++ trainers an OpenNN build with MSVC. The build scripts look for OpenNN in `%USERPROFILE%\Documents\opennn` and its build in `%USERPROFILE%\Documents\opennn-build\verify-cpu`; set `OPENNN_SRC`, `OPENNN_BUILD` and `EIGEN_SRC` (the Eigen copy that build used) to use others.
+## Quick start
+
+**The page alone.** Open [`to_show/water_treatment_hmi.html`](to_show/water_treatment_hmi.html) in a browser. It is one self-contained file that runs offline and carries WaterTAP's solutions for the stored operating points.
+
+**The page with WaterTAP running beside the network.** Clone or download this repository, then:
+
+| | Windows | Linux, macOS |
+|---|---|---|
+| Once | double-click `setup.bat` | `./setup.sh` |
+| Each time | double-click `start_demo.bat`, or open the HTML file and press **Start WaterTAP** | `./start_demo.sh` |
+
+Setup creates the Python environment (WaterTAP 1.8.0 and IDAES 2.13, about 1 GB, a few minutes), fetches the IPOPT solver, connects the page's **Start WaterTAP** button (Windows), and checks that both WaterTAP models solve. Without conda on the computer, `setup.bat` offers to install Miniforge for the current user. On Linux, IPOPT needs the Fortran runtime, LAPACK, BLAS and OpenMP libraries; when they are missing, `setup.sh` installs them with `apt-get` if it runs as root, and otherwise puts conda-forge's copies into `.venv` (no sudo needed). `start_demo` serves the page at http://127.0.0.1:8765/ and solves every operating point in WaterTAP next to the network; closing its window (or Ctrl+C) stops it. [`to_show/README.md`](to_show/README.md) explains the page, the simulator and how the networks, optima and page are rebuilt. Coding agents: [AGENTS.md](AGENTS.md).
+
+**Requirements.** The page needs a browser; the simulator needs the environment that setup creates (Windows, Linux or macOS, Python 3.11 to 3.13). Rebuilding the networks also needs Windows, MSVC and an OpenNN build: the build scripts look for OpenNN in `%USERPROFILE%\Documents\opennn` and its build in `%USERPROFILE%\Documents\opennn-build\verify-cpu`; set `OPENNN_SRC`, `OPENNN_BUILD` and `EIGEN_SRC` (the Eigen copy that build used) to use others.
 
 **Licence.** The code and data in this repository are under the MIT licence ([LICENSE](LICENSE)). The C++ trainers link OpenNN, which is licensed separately (AGPL-3.0 for current versions). WaterTAP, IDAES and Pyomo are BSD-licensed. No executables are included.
 
@@ -63,18 +74,17 @@ The data reach 0.88 × the brine osmotic pressure because WaterTAP's own optimum
 
 ## Setup
 
-This setup follows [Getting Started](https://watertap.readthedocs.io/en/latest/getting_started.html) §1 (a conda environment) and §2 (install on Windows), using the miniforge already on this machine:
+`setup.bat` (or `setup.sh`) builds the environment as [Getting Started](https://watertap.readthedocs.io/en/latest/getting_started.html) describes, with the versions pinned in `environment.yml` and `requirements.txt`. By hand:
 
 ```
-conda create --name watertap --yes -c conda-forge python=3.11
-%USERPROFILE%\miniforge3\envs\watertap\python.exe -m pip install watertap
+conda env create -f environment.yml
 %USERPROFILE%\miniforge3\envs\watertap\Scripts\idaes.exe get-extensions
 ```
 
-Versions installed on 2026-10-22:
+The versions are those installed on 2026-10-22:
 
-- watertap 1.8.0, idaes-pse 2.13.0, pyomo 6.10.1.
-- IDAES extensions 3.4.2. These already existed in `%LOCALAPPDATA%\idaes`; `get-extensions` reinstalled the same release.
+- watertap 1.8.0, idaes-pse 2.13.0, pyomo 6.10.1, on Python 3.11.
+- IDAES extensions 3.4.2, in `%LOCALAPPDATA%\idaes` (Linux and macOS: `~/.idaes`).
 
 The OpenNN side compiles `model/main.cpp` against a prebuilt OpenNN library with `model/build.bat`. That library is OpenNN `dev` at `31da51dbd`, from `Documents\opennn-build\verify-cpu`, built with MSVC 14.39 in Release. The headers and the library must come from the same commit.
 

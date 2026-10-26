@@ -8,7 +8,8 @@ Merges, without duplicates (same inputs to 6 significant digits):
   - the dashboard points solved in WaterTAP (data/<plant>_defaults_verified.csv,
     data/<plant>_optima_verified.csv and the earlier optima in data/original_network/),
   - the operating points the simulator service solved for the page
-    (models/<plant>/data/session_simulations.csv).
+    (models/<plant>/data/session_simulations.csv, kept in Git, and session_simulations_local.csv,
+    this computer's later sessions).
 
 Rows that resolve_washout.py solved again with nitrifiers (models/bsm2/data/washout_resolved.csv)
 take those outputs, in every source and in the holdout.
@@ -72,7 +73,8 @@ def main():
                 + read_rows(TO_SHOW / "data" / f"{plant}_optima_verified.csv", spec, "true_", status=True))
     for archived in sorted((TO_SHOW / "data" / "original_network").glob(f"{plant}_optima_verified*.csv")):
         verified += read_rows(archived, spec, "true_", status=True)
-    session = read_rows(folder / "session_simulations.csv", spec, status=True)
+    session = (read_rows(folder / "session_simulations.csv", spec, status=True)
+               + read_rows(folder / "session_simulations_local.csv", spec, status=True))
 
     # Washout rows that resolve_washout.py solved with nitrifiers take the nitrifying outputs (its
     # rows still labelled "washout" have no outputs and are skipped by read_rows).
