@@ -1858,6 +1858,8 @@
     }
     if (box.textContent !== text) box.textContent = text;
     box.hidden = !text;
+    // The legend names the dotted line while one of the trends shows it.
+    $("trend-auto").hidden = !def.trends.some((c) => s.history.some((p) => Number.isFinite(p[`auto_${c.key}`])));
   }
 
   function drawChart(i) {
@@ -1936,10 +1938,6 @@
       before = v;
     }
     if (steps) g += `<path class="c-ceiling" d="${steps}"/>`;
-    if (ceiling !== undefined) {
-      const away = active.upper ? 12 : -5;   // the label on the side away from the limit
-      g += `<text class="c-ceiling-label" x="${W - R - 12}" y="${(Y(ceiling) + away).toFixed(1)}" text-anchor="end">AUTO ${active.upper ? "≤" : "≥"} ${fmt(ceiling, c.digits)}</text>`;
-    }
     const last = pts[pts.length - 1];
     g += `<circle class="c-end" cx="${X(last.t).toFixed(1)}" cy="${Y(val(last)).toFixed(1)}" r="4"/>`;
 
