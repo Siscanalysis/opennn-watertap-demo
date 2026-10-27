@@ -9,6 +9,8 @@ Variables, with the units used in the dataset:
     recycle        internal (nitrate) recycle: fraction of the R5 outflow returned to R1, -
     wastage        fraction of the secondary-clarifier underflow wasted (1 - sludge recycle split), -
     influent       influent flow, m3/d (a disturbance, fixed in each scenario)
+    rain           rainwater entering with the influent, m3/d (optional, 0 when absent): it adds to
+                   the flow and dilutes every influent concentration by influent / (influent + rain)
     lcow           levelized cost of water, $/m3 of influent
     sec            specific energy consumption, kWh/m3 of influent
     tss, cod, tn, bod5, nh4   effluent concentrations, mg/L
@@ -30,13 +32,14 @@ from watertap.core.solvers import get_solver
 from watertap.flowsheets.full_water_resource_recovery_facility import BSM2 as bsm2
 
 INPUTS = ["do3", "do4", "do5", "recycle", "wastage", "influent"]
+RAIN_INPUTS = INPUTS + ["rain"]   # the plant with wet weather (to_show's storm network)
 OUTPUTS = ["lcow", "sec", "tss", "cod", "tn", "bod5", "nh4", "biogas"]
 
-BASE = {"do3": 1.72, "do4": 2.43, "do5": 0.449, "recycle": 0.6, "wastage": 0.015, "influent": 20648.0}
+BASE = {"do3": 1.72, "do4": 2.43, "do5": 0.449, "recycle": 0.6, "wastage": 0.015, "influent": 20648.0, "rain": 0.0}
 # DO starts at 0.5 mg/L: at 0.3 mg/L in all three tanks the nitrifiers wash out, and confirming
 # washout costs minutes per point. WaterTAP's own optimum sits at 0.7-0.9 mg/L.
 RANGES = {"do3": (0.5, 3.0), "do4": (0.5, 3.0), "do5": (0.5, 3.0), "recycle": (0.3, 0.8),
-          "wastage": (0.006, 0.025), "influent": (16500.0, 24800.0)}
+          "wastage": (0.006, 0.025), "influent": (16500.0, 24800.0), "rain": (0.0, 6000.0)}
 LIMITS = {"tss": 30.0, "cod": 100.0, "tn": 18.0, "bod5": 10.0, "nh4": 4.0}
 
 
@@ -59,7 +62,7 @@ MIN_STEP = 1.0 / 32.0  # a step is abandoned after four halvings of MAX_STEP
 
 
 def normalized_distance(a, b):
-    return max(abs(a[v] - b[v]) / (RANGES[v][1] - RANGES[v][0]) for v in INPUTS)
+    return max(abs(a.get(v, 0.0) - b.get(v, 0.0)) / (RANGES[v][1] - RANGES[v][0]) for v in RAIN_INPUTS)
 
 
 class Plant:
@@ -76,6 +79,10 @@ class Plant:
         m.fs.objective.deactivate()
         self.m = m
         self.reactors = [m.fs.R1, m.fs.R2, m.fs.R3, m.fs.R4, m.fs.R5]
+        # The dry-weather influent, which rain dilutes.
+        feed = m.fs.FeedWater
+        self.feed_conc = {j: value(v) for (t, j), v in feed.conc_mass_comp.items()}
+        self.feed_alkalinity = value(feed.alkalinity[0])
         self.current = dict(BASE)
         self._clone_solve()
         self.base_state = to_json(m, return_dict=True)
@@ -109,12 +116,14 @@ class Plant:
         self.current = dict(BASE)
 
     def _walk(self, target):
-        """Adaptive continuation from self.current to target; True if the target was reached."""
+        """Adaptive continuation from self.current to target; True if the target was reached.
+        A target without "rain" has none."""
+        target = {"rain": 0.0, **target}
         step = MAX_STEP
         while normalized_distance(self.current, target) > 1e-12:
             distance = normalized_distance(self.current, target)
             fraction = min(1.0, step / distance)
-            point = {v: self.current[v] + fraction * (target[v] - self.current[v]) for v in INPUTS}
+            point = {v: self.current[v] + fraction * (target[v] - self.current[v]) for v in RAIN_INPUTS}
             snapshot = to_json(self.m, return_dict=True)
             self.set_inputs(point)
             if self._solve():
@@ -136,7 +145,12 @@ class Plant:
         fs.R5.outlet.conc_mass_comp[0, "S_O"].fix(x["do5"] * 1e-3)
         fs.SP5.split_fraction[0, "underflow"].fix(x["recycle"])
         fs.SP6.split_fraction[0, "recycle"].fix(1.0 - x["wastage"])
-        fs.FeedWater.flow_vol.fix(x["influent"] / 86400.0)
+        rain = x.get("rain", 0.0)
+        share = x["influent"] / (x["influent"] + rain)
+        fs.FeedWater.flow_vol.fix((x["influent"] + rain) / 86400.0)
+        for j, c in self.feed_conc.items():
+            fs.FeedWater.conc_mass_comp[0, j].fix(c * share)
+        fs.FeedWater.alkalinity.fix(self.feed_alkalinity * share)
 
     def _walk_coordinates(self, target, order):
         """Continuation that moves one input at a time, in the given order."""
@@ -154,14 +168,15 @@ class Plant:
 
         Returns (status, outputs): "ok" with the outputs; "washout" with the outputs of the
         no-nitrifier state when the nitrifying branch cannot be reached even from the base case;
-        "failed" with None. The model is left at x after "ok", at the base case otherwise."""
-        x = {v: float(x[v]) for v in INPUTS}
+        "failed" with None. The model is left at x after "ok", at the base case otherwise.
+        x may hold "rain" (m3/d); without it there is none."""
+        x = {**{v: float(x[v]) for v in INPUTS}, "rain": float(x.get("rain", 0.0))}
         if self._walk(x):
             return "ok", self.read_outputs()
         self.restore_base()
         if self._walk(x):
             return "ok", self.read_outputs()
-        for order in (INPUTS, INPUTS[::-1]):
+        for order in (RAIN_INPUTS, RAIN_INPUTS[::-1]):
             self.restore_base()
             if self._walk_coordinates(x, order):
                 return "ok", self.read_outputs()
@@ -176,13 +191,17 @@ class Plant:
     def read_outputs(self):
         fs = self.m.fs
         effluent = fs.CL1.effluent_state[0]
+        # The sewage share of the feed, from its dilution: influent + rain is the feed flow.
+        flow = value(fs.FeedWater.flow_vol[0]) * 86400.0
+        share = value(fs.FeedWater.conc_mass_comp[0, "S_I"]) / self.feed_conc["S_I"]
         return {
             "do3": value(fs.R3.outlet.conc_mass_comp[0, "S_O"]) * 1e3,
             "do4": value(fs.R4.outlet.conc_mass_comp[0, "S_O"]) * 1e3,
             "do5": value(fs.R5.outlet.conc_mass_comp[0, "S_O"]) * 1e3,
             "recycle": value(fs.SP5.split_fraction[0, "underflow"]),
             "wastage": 1.0 - value(fs.SP6.split_fraction[0, "recycle"]),
-            "influent": value(fs.FeedWater.flow_vol[0]) * 86400.0,
+            "influent": flow * share,
+            "rain": flow * (1.0 - share),
             "lcow": value(fs.costing.LCOW),
             "sec": value(fs.costing.specific_energy_consumption),
             "tss": value(effluent.TSS) * 1e3,

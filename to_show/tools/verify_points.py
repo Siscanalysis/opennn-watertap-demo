@@ -4,7 +4,8 @@
     python verify_points.py bsm2 <out.csv> <out.csv> [workers] retry
 
 points.csv holds the plant's input columns (any other columns, such as OpenNN's predictions or an
-"objective" label, are carried over). out.csv adds a `status` column and `true_<output>` columns.
+"objective" label, are carried over); a wastewater file with a `rain` column is solved with that
+rain. out.csv adds a `status` column and `true_<output>` columns.
 The `retry` form re-attempts only the rows of an existing out.csv that failed, approaching each
 from up to eight nearby solved rows, and rewrites the file.
 """
@@ -55,9 +56,15 @@ def _evaluate_from_anchors(task):
     return "failed", None
 
 
+def input_names(module, columns):
+    """The plant's inputs, with the wastewater plant's rain when the file has that column."""
+    return module.RAIN_INPUTS if "rain" in columns and hasattr(module, "RAIN_INPUTS") else module.INPUTS
+
+
 def nearest(module, x, solved, count=3):
-    span = {v: module.RANGES[v][1] - module.RANGES[v][0] for v in module.INPUTS}
-    distance = lambda y: max(abs(x[v] - y[v]) / span[v] for v in module.INPUTS)
+    names = list(x)
+    span = {v: module.RANGES[v][1] - module.RANGES[v][0] for v in names}
+    distance = lambda y: max(abs(x[v] - y[v]) / span[v] for v in names)
     return sorted(solved, key=distance)[:count]
 
 
@@ -65,7 +72,8 @@ def retry_failed(points_path, out_path, workers):
     import bsm2_flowsheet as module
     with open(points_path, newline="") as f:
         rows = list(csv.DictReader(f))
-    as_input = lambda r: {v: float(r[v]) for v in module.INPUTS}
+    names = input_names(module, rows[0].keys())
+    as_input = lambda r: {v: float(r[v]) for v in names}
     solved = [as_input(r) for r in rows if r["status"] == "ok"]
     failed = [i for i, r in enumerate(rows) if r["status"] == "failed"]
     tasks = [(as_input(rows[i]), nearest(module, as_input(rows[i]), solved, count=8)) for i in failed]
@@ -92,10 +100,9 @@ def main():
         import bsm2_flowsheet as module
     else:
         import ro_flowsheet as module
-    inputs, outputs = module.INPUTS, module.OUTPUTS
-
     with open(points_path, newline="") as f:
         rows = list(csv.DictReader(f))
+    inputs, outputs = input_names(module, rows[0].keys()), module.OUTPUTS
     tasks = [(plant, {v: float(r[v]) for v in inputs}) for r in rows]
     with Pool(workers, initializer=_init, initargs=(plant,)) as pool:
         results = pool.map(_evaluate, tasks, chunksize=1)

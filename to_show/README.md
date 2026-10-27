@@ -41,14 +41,14 @@ The `WATERTAP` chip in the top bar says whether the simulator is offline, starti
 | Optimizer card | First the proposal: the set-points now and proposed, the outputs OpenNN predicts, and WaterTAP's solution at the proposed set-points with its limit check. After `Apply set-points`, the result: the plant before and after, both solved in WaterTAP, next to the change OpenNN predicted. |
 | Limits | Each effluent or product limit as a bar, with OpenNN's value (▲ below the bar) and WaterTAP's (▼ above it, orange). The shaded band is the safety margin the optimizer keeps. |
 | OpenNN and WaterTAP | Both at the current operating point, their difference, and how long each takes: about 10 to 20 µs per network prediction in the browser against seconds per WaterTAP solve, roughly a million times longer. |
-| Trends | The last 12 plant hours: the network's prediction as a line and WaterTAP's solutions as orange dots. A solution that arrives after the plant has moved on is drawn where the plant was. In AUTO, a dotted violet line marks where the optimizer keeps an output: its limit less the safety margin (NH₄ ≤ 3.56 mg/L with the permit). |
+| Trends | The last 12 plant hours: the network's prediction as a line and WaterTAP's solutions as orange dots. A solution that arrives after the plant has moved on is drawn where the plant was. In AUTO, a dotted violet line marks where the optimizer keeps an output: its limit less the safety margin (NH₄ ≤ 3.56 mg/L with the permit, 3.19 mg/L in a storm). The line steps where the network in use changes. |
 | Event log | Alarms, operator actions, optimizer steps and simulator results. |
 
 The tabs switch between the two plants. `Theme` cycles between system, dark and light.
 
 ### Why NH₄ stays flat in AUTO
 
-Removing more ammonium takes more aeration or an older sludge, and both cost energy, money or biogas. So each optimum uses all the room the NH₄ limit allows: that limit is what stops the optimizer. AUTO therefore holds NH₄ on the dotted line (the 4 mg/L limit less the 0.44 mg/L safety margin) while the set-points and the energy follow the influent; a note under the trends says so. WaterTAP's dots scatter around the line, below the limit: that scatter is what the margin is for.
+Removing more ammonium takes more aeration or an older sludge, and both cost energy, money or biogas. So each optimum uses all the room the NH₄ limit allows: that limit is what stops the optimizer. AUTO therefore holds NH₄ on the dotted line (the 4 mg/L limit less the 0.44 mg/L safety margin) while the set-points and the energy follow the influent; a note under the trends says so. WaterTAP's dots scatter around the line, below the limit: that scatter is what the margin is for. In a storm the line drops to 3.19 mg/L, because the storm network's error near the limit is larger (a 0.81 mg/L margin).
 
 With the set-points held (manual), NH₄ moves a lot along the daily pattern: from 1.1 to 5.5 mg/L for one stored default, in WaterTAP. The influent load and the sludge wastage move it most. One tank's dissolved oxygen moves it less, because the other two aerated tanks take up the work.
 
@@ -77,12 +77,43 @@ The search is differential evolution followed by a local pattern search (`src/op
 
 AUTO works with your limits as well: it re-optimizes for each new condition. Where nothing meets the limits, it holds the set-points and logs it.
 
+## Storm (wet weather)
+
+The wastewater plant's condition panel has a weather switch under the daily pattern: `Dry weather` or `Storm`. In a storm, rainwater enters with the sewage. The rain inflow rises to 4,500 m³/d over about an hour of plant time, and after `Dry weather` it falls back to none over about two hours. The influent meter in the diagram reads sewage and rain together, a tag below it shows the rain, and the influent trend hatches the rain's share. The daily pattern carries on underneath.
+
+**How it is modelled.** Rain adds to the flow and dilutes every influent concentration by influent / (influent + rain): the load stays the same, but the water is more dilute and passes through faster. The page carries a second wastewater network for it, the storm network, with a seventh input, `rain` (0 to 6,000 m³/d). The page uses it while it rains, and the dry-weather network otherwise, because that one is more accurate without rain. The storm network was trained on three sets of rows:
+- the dry-weather network's 1,922 rows;
+- 811 WaterTAP simulations with rain (`tools/storm_simulations.py`);
+- 331 optima of its first version, solved in WaterTAP.
+
+OpenNN computed its optima at 1,500, 3,000 and 4,500 m³/d of rain, and WaterTAP checked them. The page snaps the rain to those levels, so the network changes when the rain reaches the first level and again when it is back to none.
+
+**What to expect.** With the set-points held, NH₄ rises with the rain. Sludge wastage is a share of the clarifier underflow, so the extra flow wastes more sludge; the sludge age falls and the nitrifiers fall behind. For one set of held set-points at 20,500 m³/d of sewage (dissolved oxygen 1.31, 1.77 and 1.33 mg/L, wastage 1.98%), WaterTAP gives 2.2 mg/L of NH₄ in dry weather and 6.9 mg/L at the storm's peak, over the 4 mg/L limit. COD and suspended solids fall with the dilution, and energy per m³ falls because there are more m³ for the same work.
+
+AUTO keeps NH₄ under the limit by cutting the sludge wastage, which keeps the sludge age. For minimum energy at the same sewage flow, the optima are:
+
+| Rain, m³/d | Sludge wastage | Dissolved oxygen, tanks 3 to 5 | NH₄ in WaterTAP | Energy in WaterTAP |
+|---|---|---|---|---|
+| none (dry-weather network) | 1.75% | 0.59, 1.02, 1.02 mg/L | 3.44 mg/L | 0.286 kWh/m³ |
+| 1,500 | 1.17% | 0.51, 0.50, 0.50 mg/L | 3.40 mg/L | 0.263 kWh/m³ |
+| 4,500 | 1.01% | 0.50 mg/L each (the minimum) | 3.26 mg/L | 0.236 kWh/m³ |
+
+**How well it does** (`tools/compare_rain.py`, `models/bsm2_rain/summary.txt`):
+- **Wet weather.** On 143 wet-weather simulations it never saw, the storm network's mean NH₄ error is 0.25 mg/L where NH₄ is 2 to 8 mg/L. The dry-weather network, which ignores the rain, is off by 1.92 mg/L on the same points.
+- **Washout.** Above 8 mg/L, mostly washouts, the errors are 3.8 and 16.3 mg/L. 87 of the 954 wet simulations that solved washed out, with NH₄ at 31 to 36 mg/L, mostly above 3,000 m³/d of rain with high wastage. They stay in the training data; unlike the dry data, none was re-solved to look for a nitrifying solution.
+- **Dry weather.** On the 119 dry held-out simulations, the storm network is the less accurate of the two: 0.25 against 0.18 mg/L where NH₄ is 2 to 8 mg/L. That is why the page keeps the dry-weather network when there is no rain.
+- **Its optima.** In the first round, 36 of the 331 optima that WaterTAP solved missed the NH₄ limit, by a median 0.23 mg/L; one of them washed out. `run_storm.py` added those 331 checked points to the training data and retrained. Of the second round's 252 optima at 1,500 to 4,500 m³/d, WaterTAP solved 246 and all of them meet every limit (highest NH₄ 3.67 mg/L); it did not converge at the other 6. The storm network's margin near the NH₄ limit is wider (0.81 against 0.44 mg/L).
+- **Without rain.** Its optima would use a median 1.1% more energy than the dry-weather network's.
+
+**Read with care.** The model is steady state, so a storm shows the plant settled into wet weather, as after days of rain, and not the first hours of a storm. WaterTAP's steady BSM2 has no first flush, no clarifier overload (its clarifiers split at fixed fractions) and no temperature effect, so these are missing too. A storm as an event belongs to the dynamic benchmark (`../bsm2_dynamic`).
+
 ## Where the numbers come from
 
 - **Models.** Each plant is a WaterTAP flowsheet solved at steady state (`../bsm2_steady` and the RO toy in `..`).
 - **Networks.** The networks on the page were retrained in OpenNN for it, on the original simulations plus new ones (`models/<plant>/`; the toy folders keep the original networks):
   - desalination: 1,560 simulations, 596 more than the original 964 (same architecture, 32 hidden neurons);
-  - wastewater: 1,922 simulations, 952 more than the original 970, with two hidden layers of 32 neurons instead of one. Half of the 800 new simulations went where the original network put the effluent near a limit; the rest of the new rows are WaterTAP solutions of the dashboard's defaults and optima.
+  - wastewater: 1,922 simulations, 952 more than the original 970, with two hidden layers of 32 neurons instead of one. Half of the 800 new simulations went where the original network put the effluent near a limit; the rest of the new rows are WaterTAP solutions of the dashboard's defaults and optima;
+  - wastewater in a storm (`models/bsm2_rain`, used while it rains): 3,064 rows, the 1,922 above, 811 wet-weather simulations and 331 optima of its first version, with rain as a seventh input and two hidden layers of 32 neurons. See [Storm](#storm-wet-weather) for how it compares.
 
   A seeded 15% of the new simulations was kept out of training, so both networks can be compared on simulations neither saw (`tools/compare_networks.py`):
 
@@ -104,7 +135,8 @@ AUTO works with your limits as well: it re-optimizes for each new condition. Whe
 - **Verification.** The stored points were solved in WaterTAP (`tools/verify_points.py`):
   - all 120 default operations (60 per plant) meet every limit;
   - 83 of the 84 wastewater optima and all 19 desalination optima meet every limit;
-  - WaterTAP did not converge at the remaining wastewater optimum (minimum energy at 21,700 m³/d), and the page says so when it is proposed.
+  - WaterTAP did not converge at the remaining wastewater optimum (minimum energy at 21,700 m³/d), and the page says so when it is proposed;
+  - of the storm network's 252 optima (1,500 to 4,500 m³/d of rain), WaterTAP solved 246, and all of them meet every limit.
   - Against the original network's optima, both solved in WaterTAP (`data/original_network/`, `tools/compare_optima.py`):
     - the wastewater minimum-energy optima use a median 2.4% less energy (0.9 to 7.9%) at every solved condition;
     - minimum cost is 0.2% lower at every condition, and maximum biogas is equal within 0.1%;
@@ -118,6 +150,7 @@ AUTO works with your limits as well: it re-optimizes for each new condition. Whe
 - `wastewater_result.png`: the result, with WaterTAP's saving next to OpenNN's prediction;
 - `wastewater_your_limits.png`: NH₄ limited to 2 mg/L;
 - `wastewater_auto.png`: AUTO after the daily peak;
+- `wastewater_storm.png`: AUTO in a storm at 4,500 m³/d of rain, with the simulator running: the rain hatched in the influent trend, and the AUTO line stepping down to the storm network's;
 - `desalination_light.png`: the light theme;
 - `wastewater_nh4_paths.png`: original and retrained network against WaterTAP along the daily-pattern paths.
 
@@ -130,7 +163,7 @@ AUTO works with your limits as well: it re-optimizes for each new condition. Whe
 - `POST /prefetch` gives the points the plant is about to reach. During the daily pattern or the salinity swing, the page sends the next condition values with the set-points held (or at the optimum, in AUTO).
 - `GET /results?since=n` returns the solutions finished since the page last asked. The page pulls them every 1.5 s and draws them on the trends, at the time the plant was at that point.
 
-Checks (an OpenNN proposal, the points before and after applying it) go first, in order. Next comes the plant's current point; a newer one replaces one still waiting, so the simulator follows the operator instead of working through a backlog. Prefetched points come last. Results are cached, and the stored points are loaded at start. Every new solve is appended to `models/<plant>/data/session_simulations_local.csv` (not in Git), so the points visited while presenting can join the next retraining; `session_simulations.csv` holds those of earlier sessions that the current networks were trained with.
+Checks (an OpenNN proposal, the points before and after applying it) go first, in order. Next comes the plant's current point; a newer one replaces one still waiting, so the simulator follows the operator instead of working through a backlog. Prefetched points come last. Results are cached, and the stored points are loaded at start. Every new solve is appended to `models/<plant>/data/session_simulations_local.csv` (not in Git), so the points visited while presenting can join the next retraining; `session_simulations.csv` holds those of earlier sessions that the current networks were trained with. Wastewater solves record the rain too: a log begun before the rain input is rewritten with a `rain` column (0 for its rows) when the service starts. `prepare_training.py` takes the dry rows and `prepare_rain_training.py` the rainy ones.
 
 `python simulator/server.py --check` builds both WaterTAP models, solves one point with each and exits; setup runs it.
 
@@ -167,7 +200,17 @@ python tools/build_dashboard.py
 
 The `scenarios.py` runs store the guided demo's paths in WaterTAP: 12 defaults each held through the whole condition range, and the optimum the demo applies at each default's condition held the same way. The page carries them, so the demo shows WaterTAP without the simulator. Desalination paths that cannot run at high salinity (feed pressure below the brine's osmotic pressure) are stored but not used by the demo.
 
-The wastewater network is trained with `set BSM2_LAYERS=2`, `set BSM2_NEURONS=16,24,32` and `set BSM2_SELECT=nh4` (two hidden layers, chosen by the validation error of log NH₄ between 1 and 20 mg/L). Without them, `bsm2_surrogate train` reproduces the toy's original one-layer network. `set BSM2_SWEEP=min_energy` (or `min_cost`, `max_biogas`) sweeps one objective into `results/dashboard_optima_<objective>.csv`, so the three can run in parallel; join them into `dashboard_optima.csv`.
+The wastewater network is trained with `set BSM2_LAYERS=2`, `set BSM2_NEURONS=16,24,32` and `set BSM2_SELECT=nh4` (two hidden layers, chosen by the validation error of log NH₄ between 1 and 20 mg/L). Without them, `bsm2_surrogate train` reproduces the toy's original one-layer network. `set BSM2_SWEEP=min_energy` (or `min_cost`, `max_biogas`) sweeps one objective into `results/dashboard_optima_<objective>.csv`, so the three can run in parallel; join them into `dashboard_optima.csv`. `bsm2_surrogate` takes its inputs from the dataset's columns, so a dataset with a `rain` column gives the storm network, and `set BSM2_RAIN_LEVELS=0,1500,3000,4500` sweeps those rain flows too.
+
+The storm network (`models/bsm2_rain`, see [Storm](#storm-wet-weather)) has its own pipeline:
+
+```
+python tools/storm_simulations.py 1000 6 --until=16:30     wet-weather simulations, resumable
+python tools/run_storm.py --until=19:45                    training, optima and WaterTAP checks, rounds
+python tools/build_dashboard.py                            the page carries the storm network once it exists
+```
+
+`run_storm.py` runs `prepare_rain_training.py` (the dry training set with no rain, the wet-weather simulations and, from the second round, the checked optima), trains two hidden layers of 32 or 48 neurons, exports the weights, sweeps the three objectives at four rain levels, solves the optima in WaterTAP and, if one misses a limit, starts a second round when there is time for it. `compare_rain.py` then writes `models/bsm2_rain/summary.txt` and `comparison.csv`. The `bsm2_surrogate.exe` for this pipeline must come from the same OpenNN commit as the dry network's (dev `31da51dbd`); `bsm2_steady/model/build.bat` takes `OPENNN_SRC`, `OPENNN_DEPS`, `OPENNN_LIB` and `EIGEN_SRC` for a build kept elsewhere.
 
 | Step | What it does | Time |
 |---|---|---|
@@ -183,4 +226,6 @@ The wastewater network is trained with `set BSM2_LAYERS=2`, `set BSM2_NEURONS=16
 | `scenarios.py`, `compare_scenarios.py` | The demo's paths (a default, or the optimum at its condition, held while the influent or the salinity sweeps its range) solved in WaterTAP; NH₄ of each wastewater network along the default paths (`models/bsm2/scenarios_nh4.png`). | about 10 minutes per wastewater set, 5 per desalination set |
 | `check_optimizer.mjs` | The page's optimizer against OpenNN's stored optima at the permit limits. | seconds |
 | `make_defaults.py` | Only to draw new default operations (then `verify_points.py` on `data/<plant>_default_candidates.csv`). The page keeps the stored defaults that the network also places within every limit. | seconds |
+| `storm_simulations.py` | Wet-weather WaterTAP simulations: a Latin hypercube over the six inputs and rain (0 to 6,000 m³/d), written as chunks finish (`models/bsm2_rain/data/rain_simulations.csv`). | about 4 hours for 1,000 points on 6 workers |
+| `run_storm.py`, `prepare_rain_training.py`, `compare_rain.py` | The storm network's training, optima, WaterTAP checks and comparison with the dry network, in rounds, stopping at a given time. | about 1 to 1.5 hours per round, most of it the WaterTAP checks |
 | `build_dashboard.py` | Writes `water_treatment_hmi.html`. | seconds |

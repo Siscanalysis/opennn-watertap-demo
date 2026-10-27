@@ -30,7 +30,7 @@ This repository holds three related toys and the demo:
 | Reverse osmosis | this README | WaterTAP RO with energy recovery: 3 inputs, 6 outputs, 7 scenarios checked in WaterTAP |
 | BSM2, steady state | [bsm2_steady/](bsm2_steady/README.md) | WaterTAP's steady-state BSM2 plant (activated sludge + digester): 6 inputs, 8 outputs, effluent limits |
 | BSM2, dynamic | [bsm2_dynamic/](bsm2_dynamic/README.md) | plan and building block for the dynamic IWA benchmark (bsm2-python) with OpenNN |
-| Control-room demo | [to_show/](to_show/README.md) | `water_treatment_hmi.html`: one offline page with both plants, the OpenNN networks running in the browser, OpenNN-optimized set-points checked in WaterTAP, limits you can change, a guided demo, and the WaterTAP simulator beside the network when the local service runs |
+| Control-room demo | [to_show/](to_show/README.md) | `water_treatment_hmi.html`: one offline page with both plants, the OpenNN networks running in the browser, OpenNN-optimized set-points checked in WaterTAP, limits you can change, a storm switch with its own wet-weather network, a guided demo, and the WaterTAP simulator beside the network when the local service runs |
 
 The rest of this README covers the reverse osmosis toy.
 

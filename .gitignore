@@ -20,3 +20,10 @@ to_show/models/bsm2_variants/
 .venv/
 to_show/simulator/python_path*.txt
 to_show/models/*/data/session_simulations_local.csv
+
+# Logs and round backups of the storm network's runs (run_storm.py)
+to_show/models/*.log
+to_show/models/*.out
+to_show/models/bsm2_rain/logs/
+to_show/models/bsm2_rain/round*/
+to_show/models/bsm2_rain/run_log.txt

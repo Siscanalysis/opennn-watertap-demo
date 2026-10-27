@@ -50,9 +50,39 @@ sys.path.insert(0, str(TOY))
 sys.path.insert(0, str(TOY / "bsm2_steady"))
 PAGE = TO_SHOW / "water_treatment_hmi.html"
 
-INPUTS = {"bsm2": ["do3", "do4", "do5", "recycle", "wastage", "influent"], "ro": ["salinity", "recovery", "pressure"]}
+INPUTS = {"bsm2": ["do3", "do4", "do5", "recycle", "wastage", "influent", "rain"], "ro": ["salinity", "recovery", "pressure"]}
 OUTPUTS = {"bsm2": ["lcow", "sec", "tss", "cod", "tn", "bod5", "nh4", "biogas"],
            "ro": ["lcow", "sec", "permeate_ppm", "flux_out", "flux_avg", "area"]}
+# Inputs a page or a stored file may leave out: the dry-weather network has no rain.
+OPTIONAL = {"rain": 0.0}
+
+
+def complete(plant, x):
+    """The point with every input of the plant, optional ones at their default."""
+    return {v: float(x[v]) if v in x and x[v] not in ("", None) else OPTIONAL[v] for v in INPUTS[plant]}
+
+
+def upgrade_log(path, columns):
+    """Rewrites a session log begun with fewer columns (before the rain input) with the current
+    ones: its rows get the default of each missing input. Rows that already have every column
+    (appended under the old header) are kept as they are."""
+    if not path.exists():
+        return
+    with open(path, newline="") as f:
+        rows = list(csv.reader(f))
+    if not rows or rows[0] == columns:
+        return
+    header, out = rows[0], []
+    for row in rows[1:]:
+        if len(row) == len(columns):
+            out.append(row)
+        else:
+            old = dict(zip(header, row))
+            out.append([old[c] if c in old else f"{OPTIONAL[c]:.8g}" if c in OPTIONAL else "" for c in columns])
+    with open(path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(columns)
+        writer.writerows(out)
 
 
 # ------------------------------------------------------------------ worker processes
@@ -86,7 +116,7 @@ def _quick_bsm2(model, x):
     is, then one from the base case. Near nitrifier washout the full fallback chain (walks one input
     at a time, then a solve without the autotroph floor) can take minutes per point, which would
     starve the operator's current point; here such a point fails within seconds instead."""
-    x = {v: float(x[v]) for v in INPUTS["bsm2"]}
+    x = complete("bsm2", x)
     if model._walk(x):
         return "ok", model.read_outputs()
     model.restore_base()
@@ -135,6 +165,8 @@ class PlantService:
         self.cache = {}
         # Solves of this computer's sessions; session_simulations.csv holds those already used in training.
         self.log_path = TO_SHOW / "models" / plant / "data" / "session_simulations_local.csv"
+        self.log_columns = ["time", "status", "seconds"] + INPUTS[plant] + OUTPUTS[plant]
+        upgrade_log(self.log_path, self.log_columns)
         self.preload()
 
     def key(self, x):
@@ -145,20 +177,20 @@ class PlantService:
 
     def preload(self):
         files = [TO_SHOW / "data" / f"{self.plant}_defaults_verified.csv", TO_SHOW / "data" / f"{self.plant}_optima_verified.csv",
-                 TO_SHOW / "data" / f"{self.plant}_paths_verified.csv"]
+                 TO_SHOW / "data" / f"{self.plant}_paths_verified.csv", TO_SHOW / "data" / f"{self.plant}_rain_optima_verified.csv"]
         for path in files:
             if path.exists():
                 with open(path, newline="") as f:
                     for row in csv.DictReader(f):
                         if row.get("status") in ("ok", "washout") and row.get(f"true_{OUTPUTS[self.plant][0]}"):
-                            self.remember({v: float(row[v]) for v in INPUTS[self.plant]}, row["status"],
+                            self.remember(complete(self.plant, row), row["status"],
                                           {k: float(row[f"true_{k}"]) for k in OUTPUTS[self.plant]})
         for path in (self.log_path.with_name("session_simulations.csv"), self.log_path):
             if path.exists():
                 with open(path, newline="") as f:
                     for row in csv.DictReader(f):
                         if row["status"] in ("ok", "washout"):
-                            self.remember({v: float(row[v]) for v in INPUTS[self.plant]}, row["status"],
+                            self.remember(complete(self.plant, row), row["status"],
                                           {k: float(row[k]) for k in OUTPUTS[self.plant]})
 
     def start(self):
@@ -287,7 +319,7 @@ class PlantService:
         with open(self.log_path, "a", newline="") as f:
             writer = csv.writer(f)
             if new:
-                writer.writerow(["time", "status", "seconds"] + INPUTS[self.plant] + OUTPUTS[self.plant])
+                writer.writerow(self.log_columns)
             outputs = result["outputs"] or {}
             writer.writerow([time.strftime("%Y-%m-%d %H:%M:%S"), result["status"], result["seconds"]]
                             + [f"{x[v]:.8g}" for v in INPUTS[self.plant]]
@@ -380,7 +412,7 @@ class Handler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
 
     def point(self, plant, x):
-        point = {v: float(x[v]) for v in INPUTS[plant]}
+        point = complete(plant, x)
         if not all(math.isfinite(v) for v in point.values()):
             raise ValueError("inputs must be finite")
         return point

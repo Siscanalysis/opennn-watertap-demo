@@ -49,6 +49,8 @@ def read_rows(path, spec, prefix="", status=False):
         for row in csv.DictReader(f):
             if status and row.get("status") not in ("ok", "washout"):
                 continue
+            if float(row.get("rain") or 0.0) != 0.0:  # wet weather belongs to the storm network
+                continue
             try:
                 values = [float(row[c]) for c in spec["inputs"]] + [float(row[prefix + c]) for c in spec["outputs"]]
             except (KeyError, ValueError):

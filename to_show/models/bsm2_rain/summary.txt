@@ -1,0 +1,27 @@
+Dry held-out simulations (119, 21 with NH4 2-8 mg/L): mean error, dry network / storm network
+  dry    nh4 0.290  nh4 2-8 0.176  tn 0.313  sec 0.0011  lcow 0.00029  biogas 1.6
+  storm  nh4 0.382  nh4 2-8 0.249  tn 0.368  sec 0.0014  lcow 0.00040  biogas 1.8
+Wet held-out simulations (143): storm network's mean error by rain flow
+  rain     0-2000  ( 56)  nh4 0.125  tn 0.447  sec 0.0017  cod 0.15
+  rain  2000-4000  ( 52)  nh4 0.934  tn 1.331  sec 0.0030  cod 0.18
+  rain  4000-6000  ( 35)  nh4 1.487  tn 0.684  sec 0.0022  cod 0.17
+  NH4 mean error by NH4 range: storm network / dry network (which ignores the rain)
+  nh4 2-8 mg/L ( 28)  storm 0.249  dry 1.918
+  nh4 above 8  ( 26)  storm 3.774  dry 16.332
+Storm optima in WaterTAP: solved / within every limit / of all, per rain level and objective
+  rain     0 max_biogas  28 / 28 / 28   highest NH4 3.26
+  rain     0 min_cost    28 / 28 / 28   highest NH4 3.28
+  rain     0 min_energy  28 / 28 / 28   highest NH4 3.40
+  rain  1500 max_biogas  28 / 28 / 28   highest NH4 3.14
+  rain  1500 min_cost    26 / 26 / 28   highest NH4 3.42
+  rain  1500 min_energy  26 / 26 / 28   highest NH4 3.67
+  rain  3000 max_biogas  28 / 28 / 28   highest NH4 3.20
+  rain  3000 min_cost    28 / 28 / 28   highest NH4 3.05
+  rain  3000 min_energy  28 / 28 / 28   highest NH4 3.67
+  rain  4500 max_biogas  28 / 28 / 28   highest NH4 3.35
+  rain  4500 min_cost    27 / 27 / 28   highest NH4 2.07
+  rain  4500 min_energy  27 / 27 / 28   highest NH4 3.53
+At no rain, storm optima against the dry network's optima (WaterTAP values; + = storm better)
+  min_energy  median -1.11 %  (range -2.76 to -0.38, 27 conditions)
+  min_cost    median -0.09 %  (range -0.16 to +0.02, 28 conditions)
+  max_biogas  median -0.04 %  (range -0.32 to +0.12, 28 conditions)

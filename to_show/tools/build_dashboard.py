@@ -7,13 +7,17 @@ Inlines src/style.css, src/model.js and src/app.js into src/index.html, with a J
   - the default operations that are feasible in WaterTAP (data/<plant>_defaults_verified.csv) and
     that the network does not show over a limit,
   - the limits, safety margins and model facts shown on the page, including how the retrained
-    network compares with the original one (models/<plant>/comparison.csv).
+    network compares with the original one (models/<plant>/comparison.csv),
+  - for the wastewater plant, once run_storm.py has made it, the storm network (seventh input:
+    rain), which the page uses while it rains: its weights, margins, optima at each rain level
+    (data/bsm2_rain_optima_verified.csv) and facts (models/bsm2_rain/comparison.csv).
 
-    python build_dashboard.py
+    python build_dashboard.py [--out=<file>]      (default: to_show/water_treatment_hmi.html)
 """
 
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -99,9 +103,9 @@ def margin_data(plant, keys):
     return {k: [[short(float(r[k])), short(abs(float(r[f"{k}_predicted"]) - float(r[k])))] for r in rows] for k in keys}
 
 
-def nh4_high_mae():
-    """The retrained wastewater network's mean NH4 error on held-out points above 8 mg/L, or None."""
-    row = read_comparison("bsm2").get(("nh4_above_8", "nh4", "retrained"))
+def mean_error(plant, subset, key, network):
+    """A network's mean absolute error on a subset of held-out simulations (comparison.csv), or None."""
+    row = read_comparison(plant).get((subset, key, network))
     return float(row["mae"]) if row else None
 
 
@@ -122,9 +126,14 @@ def comparison_text(plant, items):
             + " and ".join(parts) + ".")
 
 
+def value_of(row, k):
+    """An input of a stored row; dry-weather files have no rain column (no rain)."""
+    return float(row.get(k) or 0.0) if k == "rain" else float(row[k])
+
+
 def point(row, inputs, outputs, feasible_fn):
     """One stored operating point: inputs, OpenNN prediction (when present) and WaterTAP solution."""
-    x = {k: float(row[k]) for k in inputs}
+    x = {k: value_of(row, k) for k in inputs}
     y = {k: float(row[k]) for k in outputs if row.get(k, "") != ""}
     true = None
     if row.get("status") in ("ok", "washout") and row.get(f"true_{outputs[0]}", "") != "":
@@ -144,13 +153,13 @@ def paths_data(plant, inputs, outputs, disturbance):
     solved = lambda rows: [r for r in rows if r["status"] in ("ok", "washout")]
     short = lambda v: float(f"{float(v):.6g}")
     data = {"inputs": inputs, "outputs": outputs,
-            "rows": [[short(r[k]) for k in inputs] + [short(r[f"true_{k}"]) for k in outputs]
+            "rows": [[short(value_of(r, k)) for k in inputs] + [short(r[f"true_{k}"]) for k in outputs]
                      for r in solved(every) + solved(optimum_every)]}
     # Only paths solved at every grid value serve the guided demo (held at high salinity, some
     # desalination set-points fall below the brine's osmotic pressure and have no solution): the
     # default's own path, and the path of the optimum the demo applies at the default's condition.
     broken = {r["scenario"] for r in every if r["status"] not in ("ok", "washout")}
-    held = {tuple(f"{float(r[k]):.6g}" for k in inputs if k != disturbance) for r in solved(every) if r["scenario"] not in broken}
+    held = {tuple(f"{value_of(r, k):.6g}" for k in inputs if k != disturbance) for r in solved(every) if r["scenario"] not in broken}
     starts = None
     if optimum_every:
         broken = {r["scenario"] for r in optimum_every if r["status"] not in ("ok", "washout")}
@@ -170,6 +179,23 @@ def defaults_for(plant, model, inputs, outputs, feasible, held=frozenset(), dist
     print(f"{plant}: {len(kept)} of {sum(d['feasible'] for d in stored)} WaterTAP-feasible default operations "
           f"are within every limit for the network too; {sum(d['path'] for d in kept)} have a stored path")
     return kept
+
+
+def network_facts(net, model, summary):
+    """The facts of a wastewater network shown on the page: architecture, weights and test R²."""
+    inputs, outputs = model["inputs"], model["outputs"]
+    return {
+        "rows": count_rows(DATASET[net]),
+        "architecture": architecture(inputs, outputs, summary),
+        "parameters": sum(len(l["biases"]) + sum(len(r) for r in l["weights"]) for l in model["layers"]),
+        "r2_text": (f"{summary['sec']:.3f} for energy, {summary['lcow']:.4f} for cost and {summary['biogas']:.4f} for biogas; "
+                    f"{summary['nh4']:.2f} for ammonium overall, {r2_below(net, 'nh4', 8.0):.2f} below 8 mg/L where the limit is"),
+    }
+
+
+def stored_facts(stored):
+    return {"optima": len(stored), "optima_feasible": sum(p["feasible"] for p in stored),
+            "optima_unsolved": sum(p["true"] is None for p in stored)}
 
 
 def bsm2():
@@ -194,28 +220,81 @@ def bsm2():
     paths, held, starts = paths_data("bsm2", inputs, outputs, "influent")
     defaults = defaults_for("bsm2", model, inputs, outputs, feasible, held, "influent", starts)
     summary = read_summary(ROOT["bsm2"] / "model" / "training_summary.txt")
-    rows, original = count_rows(DATASET["bsm2"]), count_rows(ORIGINAL_DATASET["bsm2"])
-    stored = [p for list_ in objectives.values() for p in list_ if p]
-    facts = {
-        "rows": rows,
-        "architecture": architecture(inputs, outputs, summary),
-        "parameters": sum(len(l["biases"]) + sum(len(r) for r in l["weights"]) for l in model["layers"]),
-        "r2_text": (f"{summary['sec']:.3f} for energy, {summary['lcow']:.4f} for cost and {summary['biogas']:.4f} for biogas; "
-                    f"{summary['nh4']:.2f} for ammonium overall, {r2_below('bsm2', 'nh4', 8.0):.2f} below 8 mg/L where the limit is"),
+    facts = network_facts("bsm2", model, summary)
+    facts.update({
         "source": (f"WaterTAP's steady-state BSM2 plant (ASM1 activated sludge, ADM1 digester), sampled over the five "
                    f"set-points and the influent flow, with one round of extra simulations where the optimizer went. "
-                   f"For this page it was retrained with {rows - original:,} more, half of them near the effluent limits."),
+                   f"For this page it was retrained with {facts['rows'] - count_rows(ORIGINAL_DATASET['bsm2']):,} more, "
+                   f"half of them near the effluent limits."),
         "comparison": comparison_text("bsm2", [("sec", "all", "energy", "kWh/m³", 4),
                                                ("nh4", "nh4_2_to_8", "ammonium", "mg/L", 2)]),
-        "nh4_high_mae": nh4_high_mae(),
+        "nh4_high_mae": mean_error("bsm2", "nh4_above_8", "nh4", "retrained"),
         "defaults": len(defaults),
-        "optima": len(stored),
-        "optima_feasible": sum(p["feasible"] for p in stored),
-        "optima_unsolved": sum(p["true"] is None for p in stored),
-    }
-    return {"model": model, "disturbance": {"name": "influent", "grid": grid}, "limits": limits,
+        **stored_facts([p for list_ in objectives.values() for p in list_ if p]),
+    })
+    data = {"model": model, "disturbance": {"name": "influent", "grid": grid}, "limits": limits,
             "margin_data": margin_data("bsm2", list(bounds)), "paths": paths,
             "objectives": objectives, "defaults": defaults, "facts": facts}
+    storm = storm_network(bounds, feasible, grid)
+    if storm:
+        data["storm"] = storm
+    return data
+
+
+def storm_network(bounds, feasible, grid):
+    """The storm network (models/bsm2_rain, a seventh input: rain), which the page uses while it
+    rains: its weights, the validation errors behind its safety margins, its optima at each rain
+    level of the storm (level after level, each over the influent grid) and its facts. None until
+    run_storm.py has made it. At no rain the page keeps the dry-weather network, more accurate there."""
+    net = "bsm2_rain"
+    weights, verified = TO_SHOW / "weights" / f"{net}_network.json", TO_SHOW / "data" / f"{net}_optima_verified.csv"
+    if not (weights.exists() and verified.exists()):
+        return None
+    model = json.loads(weights.read_text())
+    inputs = [i["name"] for i in model["inputs"]]
+    outputs = [o["name"] for o in model["outputs"]]
+    optima_rows = read_rows(verified)
+    levels = sorted({round(value_of(r, "rain")) for r in optima_rows} - {0})
+    objectives = {}
+    for name in ("min_energy", "min_cost", "max_biogas"):
+        by_value = {(round(value_of(r, "rain")), round(float(r["influent"]))): point(r, inputs, outputs, feasible)
+                    for r in optima_rows if r["objective"] == name}
+        objectives[name] = [by_value.get((level, round(g))) for level in levels for g in grid]
+
+    # What it learned from: the dry-weather network's simulations, the wet-weather ones, and the
+    # optima of its earlier rounds solved in WaterTAP (run_storm.py retrains when one misses a limit).
+    wet = count_rows(ROOT[net] / "data" / "rain_simulations.csv") - count_rows(ROOT[net] / "data" / "holdout.csv")
+    checked, missed = 0, 0
+    for path in sorted((TO_SHOW / "data").glob(f"{net}_optima_verified_round*.csv")):
+        solved = [r for r in read_rows(path) if r["status"] in ("ok", "washout")]
+        checked += len(solved)
+        missed += sum(not all(float(r[f"true_{k}"]) <= v * (1 + 1e-3) for k, v in bounds.items()) for r in solved)
+    source = f"The storm network learned from the same simulations and {wet:,} wet-weather ones with up to 6,000 m³/d of rain"
+    source += (f", and from the {checked} optima of its first version solved in WaterTAP, {missed} of which missed a limit."
+               if checked else ".")
+
+    # Against the dry-weather network: on wet held-out simulations (where that one ignores the
+    # rain) and on dry ones, where ammonium is 2 to 8 mg/L, near the limit.
+    error = lambda subset, network: mean_error(net, subset, "nh4", network)
+    comparison = ""
+    rows = read_comparison(net)
+    if ("wet_nh4_2_to_8", "nh4", "storm") in rows:
+        comparison = (f"On {int(rows[('wet', 'nh4', 'storm')]['samples'])} wet-weather simulations it did not see, its mean ammonium "
+                      f"error is {error('wet_nh4_2_to_8', 'storm'):.2f} mg/L where ammonium is 2 to 8 mg/L; the dry-weather network, "
+                      f"which ignores the rain, is off by {error('wet_nh4_2_to_8', 'dry'):.2f} mg/L there. In dry weather it is the less "
+                      f"accurate of the two ({error('nh4_2_to_8', 'storm'):.2f} against {error('nh4_2_to_8', 'dry'):.2f} mg/L), "
+                      f"so the page uses it only while it rains.")
+    summary = read_summary(ROOT[net] / "model" / "training_summary.txt")
+    facts = network_facts(net, model, summary)
+    facts.update({
+        "source": source,
+        "comparison": comparison,
+        "nh4_high_mae": error("wet_nh4_above_8", "storm"),
+        **stored_facts([p for list_ in objectives.values() for p in list_ if p]),
+    })
+    print(f"bsm2 storm network: {facts['optima_feasible']} of {facts['optima']} optima at rain {levels} feasible in WaterTAP")
+    return {"model": model, "margin_data": margin_data(net, list(bounds)), "objectives": objectives,
+            "rain_levels": [float(level) for level in levels], "facts": facts}
 
 
 def ro():
@@ -268,7 +347,8 @@ def main():
     page = page.replace("/*__OPTIMIZER__*/", (SRC / "optimizer.js").read_text(encoding="utf-8"))
     page = page.replace("/*__APP__*/", (SRC / "app.js").read_text(encoding="utf-8"))
     page = page.replace("__DATA__", blob)
-    target = TO_SHOW / "water_treatment_hmi.html"
+    out = next((a[len("--out="):] for a in sys.argv[1:] if a.startswith("--out=")), None)
+    target = Path(out) if out else TO_SHOW / "water_treatment_hmi.html"
     target.write_text(page, encoding="utf-8")
     for plant, p in data["plants"].items():
         f = p["facts"]

@@ -9,7 +9,7 @@ to_show/weights/<plant>_network.json:
     layers   activation, biases[j], weights[i][j] (i = layer input, j = layer output)
     outputs  name, scaler, mean, std, min, max   (scaler MeanStandardDeviation or Logarithm)
 
-    python export_weights.py [bsm2] [ro]
+    python export_weights.py [bsm2] [ro] [bsm2_rain]      (default: every network that exists)
 """
 
 import json
@@ -70,7 +70,7 @@ def convert(network_path):
 def main():
     folder = TO_SHOW / "weights"
     folder.mkdir(exist_ok=True)
-    for plant in sys.argv[1:] or list(PLANTS):
+    for plant in sys.argv[1:] or [p for p, path in PLANTS.items() if path.exists()]:
         model = convert(PLANTS[plant])
         target = folder / f"{plant}_network.json"
         target.write_text(json.dumps(model, separators=(",", ":")))

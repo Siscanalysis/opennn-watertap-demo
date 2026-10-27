@@ -10,7 +10,9 @@
 //   bsm2_surrogate validation <root> [dataset]   the validation split's targets and predictions
 //
 // Inputs:  do3, do4, do5 (DO set-points, mg/L), recycle (internal recycle fraction),
-//          wastage (wasted fraction of the clarifier underflow), influent (m3/d)
+//          wastage (wasted fraction of the clarifier underflow), influent (m3/d), and rain (m3/d)
+//          when the dataset has that column (to_show's storm network); the columns of
+//          <root>/data/bsm2_dataset.csv before the outputs are the inputs
 // Outputs: lcow ($/m3), sec (kWh/m3), effluent tss, cod, tn, bod5, nh4 (mg/L), biogas (m3/d)
 //
 // The scenarios are mirrored in verify_optima.py, which checks every answer against WaterTAP.
@@ -38,11 +40,16 @@ using namespace opennn;
 namespace
 {
 
-const vector<string> input_names = {"do3", "do4", "do5", "recycle", "wastage", "influent"};
+vector<string> input_names = {"do3", "do4", "do5", "recycle", "wastage", "influent"};
 const vector<string> output_names = {"lcow", "sec", "tss", "cod", "tn", "bod5", "nh4", "biogas"};
 
-const Index inputs_number = 6;
+Index inputs_number = 6;
 const Index outputs_number = 8;
+
+bool has_input(const string& name)
+{
+    return ranges::find(input_names, name) != input_names.end();
+}
 
 using Sense = ResponseOptimization::Objective::Sense;
 using Condition = ResponseOptimization::Constraint::Condition;
@@ -86,6 +93,37 @@ filesystem::path dataset_path(const filesystem::path& root)
 filesystem::path network_path(const filesystem::path& root)
 {
     return root / "model" / "bsm2_network.json";
+}
+
+
+// The inputs are the dataset's columns before the first output (six, or seven with rain).
+
+void read_input_names(const filesystem::path& root)
+{
+    ifstream file(dataset_path(root));
+    string header;
+    if (!getline(file, header)) return;
+    if (!header.empty() && header.back() == '\r') header.pop_back();
+
+    vector<string> names;
+    stringstream stream(header);
+    for (string cell; getline(stream, cell, ',');)
+    {
+        if (cell == output_names[0]) break;
+        names.push_back(cell);
+    }
+
+    if (names.empty()) return;
+    input_names = names;
+    inputs_number = Index(names.size());
+}
+
+
+vector<Index> column_range(Index first, Index count)
+{
+    vector<Index> columns(static_cast<size_t>(count));
+    for (Index i = 0; i < count; i++) columns[size_t(i)] = first + i;
+    return columns;
 }
 
 
@@ -242,7 +280,7 @@ void print_r2(const string& label, const VectorR& r2)
 int train(const filesystem::path& root)
 {
     TabularDataset dataset(dataset_path(root), ",", true, false);
-    dataset.set_variable_indices({0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11, 12, 13});
+    dataset.set_variable_indices(column_range(0, inputs_number), column_range(inputs_number, outputs_number));
 
     // Effluent total N and NH4 span two orders of magnitude (NH4 0.1 to 41 mg/L, the top near
     // nitrifier washout). A logarithmic scaler makes their error relative, which is what matters
@@ -384,7 +422,7 @@ int train(const filesystem::path& root)
 int validation(const filesystem::path& root)
 {
     TabularDataset dataset(dataset_path(root), ",", true, false);
-    dataset.set_variable_indices({0, 1, 2, 3, 4, 5}, {6, 7, 8, 9, 10, 11, 12, 13});
+    dataset.set_variable_indices(column_range(0, inputs_number), column_range(inputs_number, outputs_number));
 
     set_seed(0);
     dataset.split_samples_random(0.70f, 0.15f, 0.15f);
@@ -427,9 +465,11 @@ vector<Scenario> make_scenarios()
         {"bod5", Condition::LessEqual, {10.0f}},
         {"nh4", Condition::LessEqual, {4.0f}}};
 
+    // With a rain input the scenarios are in dry weather (the sweep sets other rain flows).
     const auto with = [&](const ConstraintSpec& influent, bool nitrogen_limit = true)
     {
         vector<ConstraintSpec> constraints = {influent};
+        if (has_input("rain")) constraints.push_back({"rain", Condition::Equal, {0.0f}});
         for (const ConstraintSpec& limit : limits)
             if (nitrogen_limit || limit.expression != "tn")
                 constraints.push_back(limit);
@@ -579,7 +619,8 @@ int optimize(const filesystem::path& root)
 
 // Optimal set-points over a grid of influent flows, for the dashboard in ../to_show: minimum energy
 // (B2), minimum cost (B1) and maximum biogas (B5), each within the effluent limits backed off by
-// their validation margins. Writes <root>/results/dashboard_optima.csv.
+// their validation margins. Writes <root>/results/dashboard_optima.csv. A network with a rain input
+// is swept over the rain flows in BSM2_RAIN_LEVELS (m3/d, comma separated; 0 by default) as well.
 
 int sweep(const filesystem::path& root)
 {
@@ -601,6 +642,15 @@ int sweep(const filesystem::path& root)
         file_name = "dashboard_optima_" + string(only) + ".csv";
     }
 
+    vector<float> rain_levels = {0.0f};
+    const char* levels = getenv("BSM2_RAIN_LEVELS");
+    if (has_input("rain") && levels && *levels)
+    {
+        rain_levels.clear();
+        stringstream list(levels);
+        for (string cell; getline(list, cell, ',');) rain_levels.push_back(stof(cell));
+    }
+
     ofstream file(root / "results" / file_name);
     file << setprecision(8) << "objective,";
     write_header(file, false);
@@ -611,30 +661,37 @@ int sweep(const filesystem::path& root)
         const auto found = ranges::find_if(scenarios, [&](const Scenario& s) { return s.name == scenario_name; });
         throw_if(found == scenarios.end(), "Unknown scenario " + scenario_name);
 
-        for (float influent = 16600.0f; influent <= 24700.0f + 1.0f; influent += 300.0f)
-        {
-            Scenario scenario = *found;
-            for (ConstraintSpec& constraint : scenario.constraints)
-                if (constraint.expression == "influent") constraint.values = {influent};
-            scenario = with_margins(scenario, margins);
-
-            set_seed(1);
-            DomainContraction optimization(&network);
-            configure(optimization, scenario);
-
-            try
+        for (const float rain : rain_levels)
+            for (float influent = 16600.0f; influent <= 24700.0f + 1.0f; influent += 300.0f)
             {
-                const MatrixR results = optimization.perform_response_optimization();
-                file << objective << ",";
-                write_row(file, results.row(0).transpose());
-                cout << objective << " influent " << influent << ": sec " << results(0, inputs_number + 1)
-                     << " lcow " << results(0, inputs_number) << " nh4 " << results(0, inputs_number + 6) << endl;
+                Scenario scenario = *found;
+                for (ConstraintSpec& constraint : scenario.constraints)
+                {
+                    if (constraint.expression == "influent") constraint.values = {influent};
+                    if (constraint.expression == "rain") constraint.values = {rain};
+                }
+                scenario = with_margins(scenario, margins);
+
+                set_seed(1);
+                DomainContraction optimization(&network);
+                configure(optimization, scenario);
+
+                const string where = objective + (has_input("rain") ? " rain " + to_string(int(rain)) : "")
+                                   + " influent " + to_string(int(influent));
+                try
+                {
+                    const MatrixR results = optimization.perform_response_optimization();
+                    file << objective << ",";
+                    write_row(file, results.row(0).transpose());
+                    file.flush();
+                    cout << where << ": sec " << results(0, inputs_number + 1)
+                         << " lcow " << results(0, inputs_number) << " nh4 " << results(0, inputs_number + 6) << endl;
+                }
+                catch (const exception& e)
+                {
+                    cout << where << ": " << e.what() << endl;
+                }
             }
-            catch (const exception& e)
-            {
-                cout << objective << " influent " << influent << ": " << e.what() << endl;
-            }
-        }
     }
 
     return 0;
@@ -760,11 +817,11 @@ int main(int argc, char* argv[])
         filesystem::create_directories(root / "model");
         filesystem::create_directories(root / "results");
 
+        if ((mode == "train" || mode == "validation") && argc > 3) dataset_name = argv[3];
+        read_input_names(root);
+
         if (mode == "train" || mode == "validation")
-        {
-            if (argc > 3) dataset_name = argv[3];
             return mode == "train" ? train(root) : validation(root);
-        }
         if (mode == "optimize") return optimize(root);
         if (mode == "predict" && argc > 4) return predict(root, argv[3], argv[4]);
         if (mode == "export") return export_parameters(root);

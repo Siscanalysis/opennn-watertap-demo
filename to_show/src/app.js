@@ -127,6 +127,27 @@
     },
   };
 
+  // Wet weather, for a plant that carries a storm network (a seventh input, rain): rain adds to the
+  // influent and dilutes it. The Storm switch ramps the rain to the highest level the storm optima
+  // were computed for, over about an hour of plant time, and back to none over about two; the plant
+  // settles at each level (steady state), so the rain moves level by level.
+  const STORM = Object.fromEntries(Object.keys(DEFS).map((id) => [id, DATA.plants[id].storm || null]));
+  const RAIN = Object.fromEntries(Object.keys(DEFS).map((id) => [id, !!STORM[id]]));
+  const RAIN_UP_MIN = 60, RAIN_DOWN_MIN = 120;
+  const rainLevels = (id) => [0, ...(STORM[id] ? STORM[id].rain_levels : [])];
+  // The rain of the plant now, unless given.
+  const rainOf = (id, rain) => (RAIN[id] ? rain ?? (app.plants[id] ? app.plants[id].rain : 0) : 0);
+  // The network in use, with its margins and optima: the storm network while it rains, and the
+  // dry-weather network otherwise (more accurate without rain).
+  const net = (id, rain) => (STORM[id] && rainOf(id, rain) > 0 ? STORM[id] : DATA.plants[id]);
+  const isStorm = (id, rain) => net(id, rain) !== DATA.plants[id];
+  function snapRain(id, value) {
+    let best = 0;
+    for (const level of rainLevels(id)) if (Math.abs(level - value) < Math.abs(best - value)) best = level;
+    return best;
+  }
+  const stormRain = (id) => Math.max(...rainLevels(id));
+
   // Ranges of the sliders: the region each network was trained on.
   for (const [id, def] of Object.entries(DEFS)) {
     const inputs = Object.fromEntries(DATA.plants[id].model.inputs.map((i) => [i.name, i]));
@@ -150,6 +171,7 @@
       mode: "manual", objective: def.objectives[0].id, proposal: false, pattern: false, ramp: null,
       result: null, history: [], events: [], limitStates: {}, outputs: {},
       limits: permitLimits(id), proposalPending: false, autoHeld: "",
+      storm: false, rain: 0, rainFlow: 0,
     };
   }
 
@@ -177,12 +199,14 @@
   const limitMeta = (id, l) => (l.kind === "output" ? DEFS[id].outputs[l.key] : DEFS[id].decisions.find((d) => d.name === l.key));
 
   // The safety margin of a bound: the 95th percentile of the network's validation error among the
-  // samples within a factor of two of the bound, the rule OpenNN used for the stored optima.
+  // samples within a factor of two of the bound, the rule OpenNN used for the stored optima. It
+  // belongs to the network in use at that rain.
   const MARGINS = new Map();
-  function marginFor(id, key, bound) {
-    const cacheKey = `${id}|${key}|${bound}`;
+  function marginFor(id, key, bound, rain) {
+    const storm = isStorm(id, rain);
+    const cacheKey = `${id}|${storm}|${key}|${bound}`;
     if (!MARGINS.has(cacheKey)) {
-      const data = (DATA.plants[id].margin_data || {})[key] || [];
+      const data = (net(id, rain).margin_data || {})[key] || [];
       const errors = data.filter(([t]) => t >= 0.5 * bound && t <= 2 * bound).map(([, e]) => e).sort((a, b) => a - b);
       MARGINS.set(cacheKey, errors.length ? errors[Math.ceil(0.95 * errors.length) - 1] : 0);
     }
@@ -192,9 +216,11 @@
 
   const plantState = () => app.plants[app.active];
 
-  function predict(id, setpoints, disturbance) {
-    return PlantModel.predict(DATA.plants[id].model,
-      { ...setpoints, [DEFS[id].disturbance.name]: disturbance });
+  // rain: the plant's current rain unless given; it picks the network (the dry-weather one has no
+  // rain input).
+  function predict(id, setpoints, disturbance, rain) {
+    const r = rainOf(id, rain);
+    return PlantModel.predict(net(id, r).model, { ...setpoints, [DEFS[id].disturbance.name]: disturbance, rain: r });
   }
 
   function snapToGrid(id, value) {
@@ -204,11 +230,15 @@
     return best;
   }
 
-  function storedOptimum(id, objective, disturbance) {
+  // The optima of the network in use, over the whole condition grid; the storm network's are stored
+  // rain level by rain level.
+  function storedOptimum(id, objective, disturbance, rain) {
     const grid = DEFS[id].disturbance.grid;
     const i = grid.indexOf(snapToGrid(id, disturbance));
-    const list = DATA.plants[id].objectives[objective] || [];
-    return list[i] || null;
+    const r = snapRain(id, rainOf(id, rain)), source = net(id, r);
+    const level = source.rain_levels ? source.rain_levels.indexOf(r) : 0;
+    const list = source.objectives[objective] || [];
+    return level < 0 ? null : list[level * grid.length + i] || null;
   }
 
   const decisionValues = (id, x) => Object.fromEntries(DEFS[id].decisions.map((d) => [d.name, x[d.name]]));
@@ -243,7 +273,7 @@
     }
   }
   const runHere = (job) => setTimeout(() => finishCustom(job, solveOptimum(job.task)), 0);
-  const customKey = (s, objective, condition) => `${s.id}|${objective}|${condition}|${limitsSignature(s)}`;
+  const customKey = (s, objective, condition) => `${s.id}|${objective}|${condition}|${RAIN[s.id] ? s.rain : ""}|${limitsSignature(s)}`;
 
   function optimumFor(id, objective, disturbance) {
     const s = app.plants[id];
@@ -266,7 +296,8 @@
     if (CUSTOM.requested.has(key)) return;
     CUSTOM.requested.add(key);
     const def = DEFS[s.id], o = def.objectives.find((x) => x.id === objective);
-    const box = Object.fromEntries(DATA.plants[s.id].model.inputs.map((i) => [i.name, i]));
+    const model = net(s.id, s.rain).model;
+    const box = Object.fromEntries(model.inputs.map((i) => [i.name, i]));
     const constraints = [];
     for (const l of s.limits) {
       if (!l.enabled) continue;
@@ -280,9 +311,9 @@
     if (s.id === "ro") constraints.push({ kind: "guard", min: DATA.plants.ro.guard });
     const stored = storedOptimum(s.id, objective, condition);
     const task = {
-      model: DATA.plants[s.id].model, constraints, seed: 7,
+      model, constraints, seed: 7,
       decisions: def.decisions.map((d) => ({ name: d.name, min: d.min, max: d.max })),
-      fixed: { [def.disturbance.name]: condition },
+      fixed: { [def.disturbance.name]: condition, rain: s.rain },
       objective: { output: o.output, sense: o.sense },
       starts: [...(stored ? [decisionValues(s.id, stored.x)] : []), { ...s.setpoints }],
     };
@@ -305,8 +336,9 @@
     }
     if (job.id === app.active) renderLive();
   }
-  const currentX = (s) => ({ ...s.setpoints, [DEFS[s.id].disturbance.name]: s.disturbance });
-  const withCondition = (s, setpoints) => ({ ...setpoints, [DEFS[s.id].disturbance.name]: s.disturbance });
+  const withCondition = (s, setpoints) => ({
+    ...setpoints, [DEFS[s.id].disturbance.name]: s.disturbance, ...(RAIN[s.id] ? { rain: s.rain } : {}) });
+  const currentX = (s) => withCondition(s, s.setpoints);
 
   // ------------------------------------------------------------------ WaterTAP simulator service
 
@@ -374,8 +406,10 @@
       + `(it installs WaterTAP, about 1 GB, and connects this button). You can also start <b>start_simulator.bat</b> in <code>${esc(where.page)}</code> yourself.`;
   }
 
-  const inputNames = (id) => DATA.plants[id].model.inputs.map((i) => i.name);
-  const pointKey = (id, x) => `${id}|${inputNames(id).map((n) => Number(x[n]).toPrecision(6)).join("|")}`;
+  // The simulator's inputs: the dry-weather network's, and the rain where there is a storm network
+  // (none in a point stored without it).
+  const inputNames = (id) => [...DATA.plants[id].model.inputs.map((i) => i.name), ...(RAIN[id] ? ["rain"] : [])];
+  const pointKey = (id, x) => `${id}|${inputNames(id).map((n) => Number(n === "rain" ? x[n] ?? 0 : x[n]).toPrecision(6)).join("|")}`;
   const simReady = (id) => SIM.online && !!(SIM.status && SIM.status.ready && SIM.status.ready[id]);
 
   // WaterTAP solutions carried by the page: default operations, optima, and the guided demo's paths
@@ -384,7 +418,8 @@
   function preloadStored() {
     for (const id of Object.keys(DEFS)) {
       const plant = DATA.plants[id];
-      for (const point of [...plant.defaults, ...Object.values(plant.objectives).flat()])
+      const optima = [plant, ...(STORM[id] ? [STORM[id]] : [])].flatMap((n) => Object.values(n.objectives).flat());
+      for (const point of [...plant.defaults, ...optima])
         if (point && point.true)
           SIM.results.set(pointKey(id, point.x), { status: "ok", outputs: point.true, seconds: null, source: "stored" });
       const paths = plant.paths;
@@ -458,7 +493,7 @@
         if (!usable(opt)) continue;
         setpoints = decisionValues(s.id, opt.x);
       }
-      const x = { ...setpoints, [def.disturbance.name]: value };
+      const x = { ...setpoints, [def.disturbance.name]: value, ...(RAIN[s.id] ? { rain: s.rain } : {}) };
       if (!SIM.results.has(pointKey(s.id, x))) points.push(x);
     }
     return points;
@@ -536,7 +571,7 @@
     const def = DEFS[id];
     if (kind === "plant" && !s.pattern && result.status !== "failed" && result.seconds != null) {
       const key = def.kpis[0].output, meta = def.outputs[key];
-      const predicted = predict(id, decisionValues(id, x), x[def.disturbance.name])[key];
+      const predicted = predict(id, decisionValues(id, x), x[def.disturbance.name], x.rain)[key];
       logEvent(s, "sim", `Operating point solved in ${fmt(result.seconds, 1)} s: ${meta.label.toLowerCase()} ${fmt(result.outputs[key], meta.digits)} ${meta.unit} (OpenNN ${fmt(predicted, meta.digits)})`);
     }
     if (kind === "plant" && result.status === "failed" && !s.pattern)
@@ -594,7 +629,7 @@
 
   function modelAdvisory(s, y) {
     if (s.id === "bsm2" && y.nh4 > 8) {
-      const error = DATA.plants.bsm2.facts.nh4_high_mae;
+      const error = net(s.id, s.rain).facts.nh4_high_mae;
       return `Ammonium above 8 mg/L means the nitrifiers are close to washout. The network is least accurate there${error ? ` (about ${fmt(error, error < 10 ? 1 : 0)} mg/L mean error on simulations it never saw)` : ""}; treat these values as indicative.`;
     }
     if (s.id === "ro") {
@@ -733,6 +768,19 @@
       if (next !== s.disturbance) s.disturbance = next;
     }
 
+    if (RAIN[s.id]) {
+      const peak = stormRain(s.id), minutes = (dtMs / 1000) * app.speed;
+      const target = s.storm ? peak : 0;
+      const step = (peak * minutes) / (s.storm ? RAIN_UP_MIN : RAIN_DOWN_MIN);
+      s.rainFlow = target > s.rainFlow ? Math.min(target, s.rainFlow + step) : Math.max(target, s.rainFlow - step);
+      const level = snapRain(s.id, s.rainFlow);
+      if (level !== s.rain) {
+        s.rain = level;
+        if (level === peak && s.storm) logEvent(s, "info", `Storm: rain inflow at ${fmt(level, 0)} m³/d`);
+        if (level === 0 && !s.storm) logEvent(s, "info", "Storm over: no rain inflow");
+      }
+    }
+
     if (s.ramp) {
       const f = clamp((now - s.ramp.start) / s.ramp.duration, 0, 1);
       for (const d of def.decisions) s.setpoints[d.name] = lerp(s.ramp.from[d.name], s.ramp.to[d.name], ease(f));
@@ -754,7 +802,7 @@
         s.autoHeld = "";
       } else if (opt) {
         // No set-points meet the operator's limits here: AUTO holds the plant and says so once.
-        const held = `${s.disturbance}|${limitsSignature(s)}|${s.objective}`;
+        const held = `${s.disturbance}|${s.rain}|${limitsSignature(s)}|${s.objective}`;
         if (s.autoHeld !== held) {
           s.autoHeld = held;
           logEvent(s, "opt", "AUTO: no set-points meet your limits at this condition, set-points held");
@@ -776,13 +824,15 @@
 
   function sample(s) {
     const y = s.outputs;
-    const point = { t: s.t, disturbance: s.disturbance, key: pointKey(s.id, currentX(s)) };
+    const point = { t: s.t, disturbance: s.disturbance, rain: s.rain, key: pointKey(s.id, currentX(s)) };
     const sim = simFor(s);
     const truth = sim.current && sim.result.outputs ? sim.result.outputs : null;
     for (const c of DEFS[s.id].trends) {
       if (c.key === "disturbance") continue;
       point[c.key] = y[c.key];
       if (truth) point[`sim_${c.key}`] = truth[c.key];
+      const ceiling = autoCeiling(s, c.key);
+      if (ceiling !== undefined) point[`auto_${c.key}`] = ceiling;
     }
     s.history.push(point);
     while (s.history.length && s.history[0].t < s.t - WINDOW_MIN) s.history.shift();
@@ -864,6 +914,7 @@
     // influent and primary clarifier
     s += `<text class="eq-label" x="16" y="168">INFLUENT</text>` + flowPipe("f-in", "M16 180 H100") + arrow(100, 180, "right");
     s += tag("t-in", 8, 196, 88, "FI-101 FLOW", "m³/d");
+    if (RAIN.bsm2) s += tag("t-rain", 8, 238, 88, "OF WHICH RAIN", "m³/d");
     s += eqLabel(140, 118, "PRIMARY CLARIFIER", "PC-101");
     s += `<rect class="eq" x="100" y="140" width="80" height="60"/><rect class="liquid" x="101.5" y="150" width="77" height="49"/>`
       + `<path class="eq" d="M100 200 L180 200 L140 236 Z"/><path class="sludge" d="M112 210 L168 210 L140 235 Z"/>`;
@@ -955,7 +1006,9 @@
     const sp = s.setpoints;
     const shown = displayOutputs(s), y = shown.y;
     const value = (key, digits) => (shown.missing ? "…" : fmt(y[key], digits));
-    setTag("t-in", fmt(s.disturbance, 0));
+    const flow = s.disturbance + s.rain;   // what the influent meter reads: sewage and rain
+    setTag("t-in", fmt(flow, 0));
+    if (RAIN.bsm2) setTag("t-rain", fmt(s.rain, 0));
     setTag("t-ir", fmt(sp.recycle * 100, 0));
     setTag("t-was", fmt(sp.wastage * 100, 2));
     setTag("t-sec", value("sec", 3), undefined, shown.stale);
@@ -971,10 +1024,10 @@
       const visible = clamp(Math.round(2 + (6 * (sp[`do${k + 1}`] - 0.5)) / 2.5), 2, 8);
       for (let i = 0; i < 8; i++) { const b = $(`b${k}-${i}`); if (b) b.style.display = i < visible ? "" : "none"; }
     }
-    setFlow("f-in", s.disturbance / 20648);
-    setFlow("f-pc", s.disturbance / 20648);
-    setFlow("f-ml", s.disturbance / 20648 * 1.6);
-    setFlow("f-eff", s.disturbance / 20648);
+    setFlow("f-in", flow / 20648);
+    setFlow("f-pc", flow / 20648);
+    setFlow("f-ml", flow / 20648 * 1.6);
+    setFlow("f-eff", flow / 20648);
     setFlow("f-ir", sp.recycle / 0.6 * 1.4);
     setFlow("f-ras", 1);
     setFlow("f-was", sp.wastage / 0.015 * 0.6);
@@ -1116,7 +1169,14 @@
         <div class="segmented" role="group" aria-label="Simulation speed">
           ${[1, 10, 30].map((v) => `<button type="button" data-speed="${v}" id="speed-${v}">${v} min/s</button>`).join("")}
         </div>
-      </div>`;
+      </div>
+      ${RAIN[s.id] ? `<div class="row-wrap">
+        <div class="segmented" role="group" aria-label="Weather">
+          <button type="button" id="weather-dry">Dry weather</button>
+          <button type="button" id="weather-storm">Storm</button>
+        </div>
+        <span class="hint" id="rain-note"></span>
+      </div>` : ""}`;
 
     $("setpoint-block").innerHTML = `
       <div class="block-title"><span>Set-points</span><span id="sp-owner">Operator</span></div>
@@ -1186,6 +1246,18 @@
       renderLive();
     });
     for (const v of [1, 10, 30]) $(`speed-${v}`).addEventListener("click", () => { app.speed = v; renderLive(); });
+    if (RAIN[s.id]) {
+      $("weather-storm").addEventListener("click", () => {
+        const st = plantState();
+        if (!st.storm) { st.storm = true; logEvent(st, "info", `Storm: rain inflow rising to ${fmt(stormRain(st.id), 0)} m³/d, diluting the influent`); }
+        renderLive();
+      });
+      $("weather-dry").addEventListener("click", () => {
+        const st = plantState();
+        if (st.storm) { st.storm = false; logEvent(st, "info", "Rain stopping: inflow falling to none"); }
+        renderLive();
+      });
+    }
 
     for (const d of def.decisions) {
       const input = $(`sp-${d.name}`);
@@ -1259,6 +1331,14 @@
     $("pattern-on").setAttribute("aria-pressed", String(s.pattern));
     $("pattern-off").setAttribute("aria-pressed", String(!s.pattern));
     for (const v of [1, 10, 30]) $(`speed-${v}`).setAttribute("aria-pressed", String(app.speed === v));
+    if (RAIN[s.id]) {
+      $("weather-storm").setAttribute("aria-pressed", String(s.storm));
+      $("weather-dry").setAttribute("aria-pressed", String(!s.storm));
+      const note = s.rain > 0
+        ? `Rain ${fmt(s.rain, 0)} m³/d: ${fmt(s.disturbance + s.rain, 0)} m³/d reach the plant, diluted`
+        : s.storm ? "Rain starting" : "";
+      if ($("rain-note").textContent !== note) $("rain-note").textContent = note;
+    }
 
     const auto = s.mode === "auto";
     const opt = (auto || s.proposal) ? optimumFor(s.id, s.objective, s.disturbance) : null;
@@ -1481,9 +1561,9 @@
         delta = `<div class="k-delta ${good ? "better" : bad ? "worse" : ""}">${signed(change, 1)} % vs default operation</div>`;
         const diff = y[k.output] - base[k.output];
         if (k.annual === "energy" && Math.abs(diff) > 1e-6)
-          note = `${diff < 0 ? "Saves" : "Uses"} ≈ ${fmt(Math.abs(diff) * s.disturbance * 365 / 1000, 0)} MWh/year ${diff < 0 ? "" : "more "}at this flow`;
+          note = `${diff < 0 ? "Saves" : "Uses"} ≈ ${fmt(Math.abs(diff) * (s.disturbance + s.rain) * 365 / 1000, 0)} MWh/year ${diff < 0 ? "" : "more "}at this flow`;
         if (k.annual === "cost" && Math.abs(diff) > 1e-7)
-          note = `${diff < 0 ? "Saves" : "Costs"} ≈ $${fmt(Math.abs(diff) * s.disturbance * 365, 0)} per year ${diff < 0 ? "" : "more "}at this flow`;
+          note = `${diff < 0 ? "Saves" : "Costs"} ≈ $${fmt(Math.abs(diff) * (s.disturbance + s.rain) * 365, 0)} per year ${diff < 0 ? "" : "more "}at this flow`;
         if (k.annual === "biogas" && Math.abs(diff) > 0.5)
           note = `${diff > 0 ? "+" : "−"}${fmt(Math.abs(diff) * 365 / 1000, 0)} thousand m³ of biogas per year`;
         if (k.annual === "per1000" && Math.abs(diff) > 1e-7)
@@ -1546,12 +1626,16 @@
     $("limits").innerHTML = html;
   }
 
+  // The stored WaterTAP checks of a network: the default operations (dry-weather network) and its optima.
   function verificationSentence(facts) {
     const n = facts.optima_unsolved;
     const unsolved = n === 1
       ? " WaterTAP did not converge at the remaining one, so it has no simulator check."
       : n > 1 ? ` WaterTAP did not converge at the remaining ${n}, so they have no simulator check.` : "";
-    return `In WaterTAP, all ${facts.defaults} default operations and ${facts.optima_feasible} of the ${facts.optima} stored optima meet every limit.${unsolved}`;
+    const checked = facts.defaults === undefined
+      ? `${facts.optima_feasible} of the ${facts.optima} stored storm optima`
+      : `all ${facts.defaults} default operations and ${facts.optima_feasible} of the ${facts.optima} stored optima`;
+    return `In WaterTAP, ${checked} meet every limit.${unsolved}`;
   }
 
   const twoFigures = (v) => { const p = Math.pow(10, Math.floor(Math.log10(v)) - 1); return Math.round(v / p) * p; };
@@ -1561,7 +1645,7 @@
     const s = plantState(), def = DEFS[s.id];
     const sim = simFor(s);
     const advisory = modelAdvisory(s, s.outputs);
-    const facts = DATA.plants[s.id].facts;
+    const facts = net(s.id, s.rain).facts, storm = isStorm(s.id, s.rain);
     const equations = SIM.status && SIM.status.equations ? SIM.status.equations[s.id] : null;
     const r = sim.result;
     const truth = sim.current && isSolved(r) ? r.outputs : null;
@@ -1612,7 +1696,7 @@
         + (seconds ? `, ${fmt(seconds, 1)} s for this point, about ${fmt(twoFigures((seconds * 1e6) / micros), 0)} times longer.` : ".");
       html += `<p class="note speed">${speed}</p>`;
     }
-    html += `<p class="note">The network was trained on ${fmt(facts.rows, 0)} WaterTAP simulations; on held-out simulations its R² is ${facts.r2_text}.${sim.state === "offline" ? ` ${verificationSentence(facts)}` : ""}</p>`;
+    html += `<p class="note">${storm ? "It is raining, so the storm network answers. It" : "The network"} was trained on ${fmt(facts.rows, 0)} WaterTAP simulations; on held-out simulations its R² is ${facts.r2_text}.${sim.state === "offline" ? ` ${verificationSentence(facts)}` : ""}</p>`;
     if (advisory) html += `<p>${stateChip("warn", "Model advisory")} ${esc(advisory)}</p>`;
     if ($("check").dataset.html !== html) { $("check").innerHTML = html; $("check").dataset.html = html; }
   }
@@ -1765,9 +1849,11 @@
       if (Math.abs(value - ceiling) > 0.03 * Math.abs(ceiling)) continue;
       const l = s.limits.find((x) => x.key === c.key), margin = Math.abs(l.bound - ceiling);
       const objective = def.objectives.find((o) => o.id === s.objective);
+      const storm = isStorm(s.id, s.rain);
       text = `${c.label} stays flat because AUTO holds it at ${fmt(ceiling, c.digits)} ${c.unit}: the ${fmtBound(l.bound)} ${c.unit} limit `
-        + `${l.upper ? "minus" : "plus"} a ${fmt(margin, c.digits)} ${c.unit} margin for the network's error. That limit is what stops the optimizer `
-        + `(${objective.label.toLowerCase()}), so it uses all the room the limit allows, and the set-points follow the ${asPhrase(def.disturbance.label)} instead.`;
+        + `${l.upper ? "minus" : "plus"} a ${fmt(margin, c.digits)} ${c.unit} margin for the ${storm ? "storm network's" : "network's"} error. That limit is what stops the optimizer `
+        + `(${objective.label.toLowerCase()}), so it uses all the room the limit allows, and the set-points follow the ${asPhrase(def.disturbance.label)} instead.`
+        + (storm ? " The storm network is less sure near the limit than the dry-weather one, so the margin is wider while it rains." : "");
       break;
     }
     if (box.textContent !== text) box.textContent = text;
@@ -1783,19 +1869,24 @@
     const H = 150, L = 48, R = 12, T = 10, B = 22;
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
     const pts = s.history;
-    const now = pts.length ? pts[pts.length - 1][c.key] : NaN;
+    // With rain the influent trend shows what reaches the plant, sewage and rain, with the rain hatched.
+    const rainy = c.key === "disturbance" && RAIN[s.id];
+    const val = (p) => (rainy ? p.disturbance + (p.rain || 0) : p[c.key]);
+    const now = pts.length ? val(pts[pts.length - 1]) : NaN;
     $(`chart-${i}-now`).textContent = Number.isFinite(now) ? `${fmt(now, c.digits)} ${c.unit}` : "";
     if (pts.length < 2) { svg.innerHTML = `<text class="c-axis" x="${L}" y="${H / 2}">Collecting samples…</text>`; return; }
 
     const t1 = pts[pts.length - 1].t, t0 = Math.max(pts[0].t, t1 - WINDOW_MIN);
-    const simKey = `sim_${c.key}`;
+    const simKey = `sim_${c.key}`, autoKey = `auto_${c.key}`;
     let lo = Infinity, hi = -Infinity;
     for (const p of pts) {
-      lo = Math.min(lo, p[c.key]); hi = Math.max(hi, p[c.key]);
-      if (Number.isFinite(p[simKey])) { lo = Math.min(lo, p[simKey]); hi = Math.max(hi, p[simKey]); }
+      lo = Math.min(lo, val(p), rainy ? p.disturbance : Infinity); hi = Math.max(hi, val(p));
+      for (const k of [simKey, autoKey])
+        if (Number.isFinite(p[k])) { lo = Math.min(lo, p[k]); hi = Math.max(hi, p[k]); }
     }
     // The limit in force on this output (the permit's or the operator's), if any, and in AUTO the
-    // line the optimizer keeps the prediction behind: the limit less its safety margin.
+    // line the optimizer keeps the prediction behind: the limit less the safety margin of the
+    // network in use, drawn as it was at each sample (it steps when the storm network takes over).
     const active = s.limits.find((l) => l.key === c.key && l.enabled);
     const limit = active ? active.bound : undefined;
     const ceiling = autoCeiling(s, c.key);
@@ -1806,7 +1897,7 @@
     if (hi - lo < minSpan) { const mid = (lo + hi) / 2; lo = mid - minSpan / 2; hi = mid + minSpan / 2; }
     const pad = (hi - lo) * 0.12 || Math.abs(hi) * 0.02 || 1;
     lo -= pad; hi += pad;
-    if (c.key !== "disturbance" && lo < 0 && Math.min(...pts.map((p) => p[c.key])) >= 0) lo = 0;
+    if (c.key !== "disturbance" && lo < 0 && Math.min(...pts.map(val)) >= 0) lo = 0;
     const { ticks } = niceTicks(lo, hi, 3);
     const X = (t) => L + ((W - L - R) * (t - t0)) / Math.max(1e-9, t1 - t0);
     const Y = (v) => T + ((H - T - B) * (hi - v)) / (hi - lo);
@@ -1821,21 +1912,36 @@
     for (let h = Math.ceil(t0 / 120) * 120; h <= t1; h += 120) hourTicks.push(h);
     for (const h of hourTicks) g += `<text class="c-axis" x="${X(h).toFixed(1)}" y="${H - 6}" text-anchor="middle">${clockText(h)}</text>`;
 
-    const line = pts.filter((p) => p.t >= t0).map((p) => `${X(p.t).toFixed(1)},${Y(p[c.key]).toFixed(1)}`);
-    const first = pts.find((p) => p.t >= t0);
+    const shown = pts.filter((p) => p.t >= t0);
+    const line = shown.map((p) => `${X(p.t).toFixed(1)},${Y(val(p)).toFixed(1)}`);
+    const first = shown[0];
     const area = `M${X(first.t).toFixed(1)},${(H - B).toFixed(1)} L${line.join(" L")} L${X(t1).toFixed(1)},${(H - B).toFixed(1)} Z`;
-    g += `<path class="c-area" d="${area}"/><path class="c-line" d="M${line.join(" L")}"/>`;
+    g += `<path class="c-area" d="${area}"/>`;
+    if (rainy && shown.some((p) => p.rain > 0)) {
+      const sewage = shown.map((p) => `${X(p.t).toFixed(1)},${Y(p.disturbance).toFixed(1)}`);
+      g += `<defs><pattern id="rain-hatch-${i}" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line class="c-rain-hatch" x1="0" y1="0" x2="0" y2="6"/></pattern></defs>`;
+      g += `<path class="c-rain" fill="url(#rain-hatch-${i})" d="M${sewage.join(" L")} L${[...line].reverse().join(" L")} Z"/>`;
+    }
+    g += `<path class="c-line" d="M${line.join(" L")}"/>`;
     if (limit !== undefined) {
       g += `<line class="c-limit" x1="${L}" x2="${W - R}" y1="${Y(limit).toFixed(1)}" y2="${Y(limit).toFixed(1)}"/>`;
       g += `<text class="c-limit-label" x="${W - R - 2}" y="${(Y(limit) - 4).toFixed(1)}" text-anchor="end">limit ${fmtBound(limit)}</text>`;
     }
+    let steps = "", before;
+    for (const p of shown) {
+      const v = p[autoKey];
+      if (!Number.isFinite(v)) { before = undefined; continue; }
+      const x = X(p.t).toFixed(1);
+      steps += before === undefined ? `M${x},${Y(v).toFixed(1)}` : `${v !== before ? ` L${x},${Y(before).toFixed(1)}` : ""} L${x},${Y(v).toFixed(1)}`;
+      before = v;
+    }
+    if (steps) g += `<path class="c-ceiling" d="${steps}"/>`;
     if (ceiling !== undefined) {
       const away = active.upper ? 12 : -5;   // the label on the side away from the limit
-      g += `<line class="c-ceiling" x1="${L}" x2="${W - R}" y1="${Y(ceiling).toFixed(1)}" y2="${Y(ceiling).toFixed(1)}"/>`;
       g += `<text class="c-ceiling-label" x="${W - R - 12}" y="${(Y(ceiling) + away).toFixed(1)}" text-anchor="end">AUTO ${active.upper ? "≤" : "≥"} ${fmt(ceiling, c.digits)}</text>`;
     }
     const last = pts[pts.length - 1];
-    g += `<circle class="c-end" cx="${X(last.t).toFixed(1)}" cy="${Y(last[c.key]).toFixed(1)}" r="4"/>`;
+    g += `<circle class="c-end" cx="${X(last.t).toFixed(1)}" cy="${Y(val(last)).toFixed(1)}" r="4"/>`;
 
     // WaterTAP solutions of the sampled operating points, newest first and thinned so that the
     // markers never overlap.
@@ -1855,13 +1961,13 @@
       const th = t0 + ((hx - L) / (W - L - R)) * (t1 - t0);
       let best = pts[0];
       for (const p of pts) if (Math.abs(p.t - th) < Math.abs(best.t - th)) best = p;
-      const px = X(best.t), py = Y(best[c.key]);
+      const px = X(best.t), py = Y(val(best));
       const sv = best[simKey];
       g += `<line class="c-cross" x1="${px.toFixed(1)}" x2="${px.toFixed(1)}" y1="${T}" y2="${H - B}"/><circle class="c-dot" cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" r="4.5"/>`;
       if (Number.isFinite(sv)) g += `<circle class="c-sim" cx="${px.toFixed(1)}" cy="${Y(sv).toFixed(1)}" r="4.5"/>`;
       tip.hidden = false;
       tip.textContent = c.key === "disturbance"
-        ? `${clockText(best.t)}  ${fmt(best[c.key], c.digits)} ${c.unit}`
+        ? `${clockText(best.t)}  ${fmt(val(best), c.digits)} ${c.unit}${rainy && best.rain > 0 ? ` (rain ${fmt(best.rain, 0)})` : ""}`
         : `${clockText(best.t)}  OpenNN ${fmt(best[c.key], c.digits)}${Number.isFinite(sv) ? ` · WaterTAP ${fmt(sv, c.digits)}` : ""} ${c.unit}`;
       const box = svg.getBoundingClientRect(), host = $(`chart-${i}`).getBoundingClientRect();
       const tw = tip.offsetWidth || 150;
@@ -1910,6 +2016,7 @@
     if (s.mode === "auto") setMode(s, "manual");
     if (!isPermit(s)) { s.limits = permitLimits(id); logEvent(s, "info", "Demo: limits reset to the permit"); }
     s.pattern = false;
+    if (s.storm || s.rain) { s.storm = false; s.rain = 0; s.rainFlow = 0; logEvent(s, "info", "Demo: dry weather"); }
     app.speed = 10;
     s.objective = def.objectives[0].id;
     loadDefault(s, true, true);
@@ -1941,13 +2048,18 @@
   }
 
   function renderAbout() {
-    const s = plantState(), facts = DATA.plants[s.id].facts;
+    const s = plantState(), facts = DATA.plants[s.id].facts, storm = STORM[s.id];
+    const levels = storm ? storm.rain_levels.map((v) => fmt(v, 0)) : [];
+    const levelText = levels.length > 1 ? `${levels.slice(0, -1).join(", ")} and ${levels[levels.length - 1]}` : levels.join("");
+    const stormRuns = storm ? ` While it rains, a second network takes over: the storm network (${esc(storm.facts.architecture)}, the rain flow being the seventh input). In dry weather the first one is more accurate, so the page switches between them with the weather.` : "";
+    const stormLearned = storm ? ` ${esc(storm.facts.source)}${storm.facts.comparison ? ` ${esc(storm.facts.comparison)}` : ""}` : "";
+    const stormOptima = storm ? ` For a storm it did the same at ${levelText} m³/d of rain, on the storm network: ${esc(verificationSentence(storm.facts).replace(/^In WaterTAP, /, "in WaterTAP, "))}` : "";
     $("about").innerHTML = `
-      <div><h3>What runs here</h3><p>An OpenNN neural network (${esc(facts.architecture)}, <span class="num">${fmt(facts.parameters, 0)}</span> weights) predicts the plant from its set-points. It runs in this page from its exported weights and answers at once.</p></div>
-      <div><h3>The simulator next to it</h3><p>When the WaterTAP service runs on this computer (<b>start_simulator.bat</b>), each operating point that holds still and each OpenNN proposal is also solved in the WaterTAP flowsheet, and the page shows both. Without it, only the stored WaterTAP solutions are shown.</p></div>
-      <div><h3>Where it learned</h3><p>${esc(facts.source)} The network was trained on <span class="num">${fmt(facts.rows, 0)}</span> simulations.${facts.comparison ? ` ${esc(facts.comparison)}` : ""}</p></div>
-      <div><h3>The optimizer</h3><p>For the permit limits, OpenNN response optimization found the set-points for each ${esc(DEFS[s.id].disturbance.label.toLowerCase())} beforehand, keeping each limit with a safety margin equal to the network's validation error. ${esc(verificationSentence(facts))} For limits you set, the page solves the same problem on the OpenNN network itself, in the browser.</p></div>
-      <div><h3>Read with care</h3><p>The models are steady state: each moment shows the plant settled at the current set-points and condition. Ramps and patterns are sequences of steady states, not process dynamics.</p></div>`;
+      <div><h3>What runs here</h3><p>An OpenNN neural network (${esc(facts.architecture)}, <span class="num">${fmt(facts.parameters, 0)}</span> weights) predicts the plant from its set-points. It runs in this page from its exported weights and answers at once.${stormRuns}</p></div>
+      <div><h3>The simulator next to it</h3><p>When the WaterTAP service runs on this computer (<b>Start WaterTAP</b>, after <b>setup.bat</b> once), each operating point that holds still and each OpenNN proposal is also solved in the WaterTAP flowsheet, and the page shows both. Without it, only the stored WaterTAP solutions are shown.</p></div>
+      <div><h3>Where it learned</h3><p>${esc(facts.source)} The network was trained on <span class="num">${fmt(facts.rows, 0)}</span> simulations.${facts.comparison ? ` ${esc(facts.comparison)}` : ""}${stormLearned}</p></div>
+      <div><h3>The optimizer</h3><p>For the permit limits, OpenNN response optimization found the set-points for each ${esc(DEFS[s.id].disturbance.label.toLowerCase())} beforehand, keeping each limit with a safety margin equal to the network's validation error. ${esc(verificationSentence(facts))}${stormOptima} For limits you set, the page solves the same problem on the OpenNN network in use, in the browser.</p></div>
+      <div><h3>Read with care</h3><p>The models are steady state: each moment shows the plant settled at the current set-points and condition. Ramps and patterns are sequences of steady states, not process dynamics.${RAIN[s.id] ? " A storm is therefore shown as a plant settled into wet weather: the diluted influent and the extra flow, which also wastes more sludge (wastage is a share of the clarifier underflow), so NH₄ rises. The first hours of a real storm (first flush, clarifier overload) are not modelled; WaterTAP's clarifiers have fixed splits." : ""}</p></div>`;
   }
 
   function renderLegend(id) {
