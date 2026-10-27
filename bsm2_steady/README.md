@@ -49,12 +49,12 @@ The effluent limits are the BSM2 ones, all in mg/L: TSS ≤ 30, COD ≤ 100, tot
 
 ## Setup and running
 
-The setup is the same as for the reverse osmosis toy: the `watertap` conda environment and the OpenNN library built by `model\build.bat` (OpenNN `dev` 31da51dbd). `run_all.bat` runs the base pipeline (round 0). The infill round is run by hand.
+The setup is the same as for the reverse osmosis toy: the environment from `..\setup.bat`, and `model\build.bat`, which builds `bsm2_surrogate.exe` with OpenNN through `..\build_surrogates.bat` (see the [main README](../README.md#setup)). The results here were made with OpenNN `dev` 31da51dbd. `run_all.bat` runs the base pipeline (round 0). The infill round is run by hand.
 
 | Step | Command | Time (i7-8550U) |
 |---|---|---|
 | Dataset | `python generate_dataset.py 800 6 20` | 1 h 54 min |
-| Build | `model\build.bat` | 1 min |
+| Build | `model\build.bat` | about 15 min the first time (OpenNN), then 1 min |
 | Train | `bsm2_surrogate train <root> [dataset file]` | 5 s |
 | Optimize | `bsm2_surrogate optimize <root>` | 4 min |
 | Check in WaterTAP | `python verify_optima.py 6` | 25 min |

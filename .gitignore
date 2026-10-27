@@ -27,3 +27,6 @@ to_show/models/*.out
 to_show/models/bsm2_rain/logs/
 to_show/models/bsm2_rain/round*/
 to_show/models/bsm2_rain/run_log.txt
+
+# The CMake build of the trainers (build_surrogates.bat)
+/build/

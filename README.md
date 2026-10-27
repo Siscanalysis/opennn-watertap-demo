@@ -17,7 +17,7 @@ Neural-network surrogates of WaterTAP water-treatment flowsheets (seawater RO wi
 
 Setup creates the Python environment (WaterTAP 1.8.0 and IDAES 2.13, about 1 GB, a few minutes), fetches the IPOPT solver, connects the page's **Start WaterTAP** button (Windows), and checks that both WaterTAP models solve. Without conda on the computer, `setup.bat` offers to install Miniforge for the current user. On Linux, IPOPT needs the Fortran runtime, LAPACK, BLAS and OpenMP libraries; when they are missing, `setup.sh` installs them with `apt-get` if it runs as root, and otherwise puts conda-forge's copies into `.venv` (no sudo needed). `start_demo` serves the page at http://127.0.0.1:8765/ and solves every operating point in WaterTAP next to the network; closing its window (or Ctrl+C) stops it. [`to_show/README.md`](to_show/README.md) explains the page, the simulator and how the networks, optima and page are rebuilt. Coding agents: [AGENTS.md](AGENTS.md).
 
-**Requirements.** The page needs a browser; the simulator needs the environment that setup creates (Windows, Linux or macOS, Python 3.11 to 3.13). Rebuilding the networks also needs Windows, MSVC and an OpenNN build: the build scripts look for OpenNN in `%USERPROFILE%\Documents\opennn` and its build in `%USERPROFILE%\Documents\opennn-build\verify-cpu`; set `OPENNN_SRC`, `OPENNN_BUILD` and `EIGEN_SRC` (the Eigen copy that build used) to use others.
+**Requirements.** The page needs a browser; the simulator needs the environment that setup creates (Windows, Linux or macOS, Python 3.11 to 3.13). Rebuilding the networks also needs Visual Studio 2022 or later, or its Build Tools, with the "Desktop development with C++" workload: `build_surrogates.bat` downloads OpenNN from GitHub and builds it with the two C++ trainers (about 15 minutes the first time). See [Setup](#setup).
 
 **Licence.** The code and data in this repository are under the MIT licence ([LICENSE](LICENSE)). The C++ trainers link OpenNN, which is licensed separately (AGPL-3.0 for current versions). WaterTAP, IDAES and Pyomo are BSD-licensed. No executables are included.
 
@@ -78,7 +78,7 @@ The data reach 0.88 × the brine osmotic pressure because WaterTAP's own optimum
 
 ```
 conda env create -f environment.yml
-%USERPROFILE%\miniforge3\envs\watertap\Scripts\idaes.exe get-extensions
+conda run -n watertap idaes get-extensions
 ```
 
 The versions are those installed on 2026-10-22:
@@ -86,7 +86,7 @@ The versions are those installed on 2026-10-22:
 - watertap 1.8.0, idaes-pse 2.13.0, pyomo 6.10.1, on Python 3.11.
 - IDAES extensions 3.4.2, in `%LOCALAPPDATA%\idaes` (Linux and macOS: `~/.idaes`).
 
-The OpenNN side compiles `model/main.cpp` against a prebuilt OpenNN library with `model/build.bat`. That library is OpenNN `dev` at `31da51dbd`, from `Documents\opennn-build\verify-cpu`, built with MSVC 14.39 in Release. The headers and the library must come from the same commit.
+The OpenNN side: `build_surrogates.bat` builds the two trainers, `model/ro_surrogate.exe` and `bsm2_steady/model/bsm2_surrogate.exe`, through `CMakeLists.txt`. It downloads OpenNN 26.0.3 from GitHub (`master` at `ad4dd0759`) and builds it with them, so the trainers are always compiled like the library; `model\build.bat` builds this trainer alone. To build against another OpenNN source tree, set `OPENNN_SOURCE_DIR`, with a `BUILD_DIR` of its own. The networks, optima and checks in this repository were made with OpenNN `dev` at `31da51dbd`, a development commit that is not on GitHub.
 
 ## Running
 
@@ -95,7 +95,7 @@ The OpenNN side compiles `model/main.cpp` against a prebuilt OpenNN library with
 | Step | Command | Writes | Time |
 |---|---|---|---|
 | 1. Dataset | `python generate_dataset.py 1000 6` | `data/ro_dataset.csv`, `data/ro_samples_log.csv` | 30 min |
-| 2. Build | `model\build.bat` | `model/ro_surrogate.exe` | 1 min |
+| 2. Build | `model\build.bat` | `model/ro_surrogate.exe` | about 15 min the first time (OpenNN), then 1 min |
 | 3. Train | `ro_surrogate train <root>` | `model/ro_network.json` + `.bin`, `model/constraint_margins.csv`, `results/test_predictions.csv` | 2 s |
 | 4. Optimize | `ro_surrogate optimize <root>` | `results/opennn_optima.csv`, `results/pareto_*.csv` | 2 min |
 | 5. Check in WaterTAP | `python verify_optima.py 6` | `results/comparison.md` / `.csv`, `results/pareto_check.csv`, `results/watertap_lcow_by_recovery.csv` | 10 min |
@@ -184,6 +184,7 @@ A negative gap with nominal limits does not mean OpenNN beat WaterTAP. Those poi
 | `ro_flowsheet.py` | WaterTAP wrapper: one-point solve, dataset sample, scenario optimum |
 | `generate_dataset.py` | Latin hypercube sampling in parallel workers |
 | `model/main.cpp`, `model/build.bat` | OpenNN training, response optimization scenarios, prediction |
+| `CMakeLists.txt`, `build_surrogates.bat` | builds both toys' trainers with OpenNN from GitHub |
 | `verify_optima.py` | WaterTAP check of every answer and WaterTAP's reference optima |
 | `plots.py` | the three figures |
 | `run_all.bat` | the whole pipeline |

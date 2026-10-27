@@ -20,7 +20,7 @@ From the repository root:
   curl -s -X POST http://127.0.0.1:8765/simulate -d "{\"plant\": \"ro\", \"x\": {\"salinity\": 35, \"recovery\": 0.45, \"pressure\": 60}}"
   ```
 
-  The wastewater plant (`"plant": "bsm2"`) takes `do3`, `do4`, `do5` (mg/L), `recycle` and `wastage` (fractions) and `influent` (m³/d). The answer gives `status` (`ok`, `washout` or `failed`), `outputs` and `seconds`.
+  The wastewater plant (`"plant": "bsm2"`) takes `do3`, `do4`, `do5` (mg/L), `recycle` and `wastage` (fractions), `influent` (m³/d) and, optionally, `rain` (m³/d, 0 when left out). The answer gives `status` (`ok`, `washout` or `failed`), `outputs` and `seconds`.
 - Check without serving: `python to_show/simulator/server.py --check`, with the environment's Python. On Windows that is the path in `to_show/simulator/python_path.txt`; on Linux and macOS, `.venv/bin/python`, after `source to_show/simulator/system_libs.sh`.
 - Stop: on Windows close the "WaterTAP simulator" window, or end the `python` process running `to_show/simulator/server.py` together with its worker processes. On Linux and macOS use Ctrl+C or kill the process.
 - The HTML file also works opened directly, without the service. It then shows the stored WaterTAP solutions only.
@@ -33,7 +33,7 @@ From the repository root:
 
 ## Retrain and recompute
 
-Follow "Retraining and rebuilding" in [to_show/README.md](to_show/README.md). The C++ surrogate programs need Windows, MSVC and an OpenNN build; see the requirements in the README. Generating WaterTAP data takes from tens of minutes to hours of CPU. The generation scripts save as they go and take worker counts and time limits.
+Follow "Retraining and rebuilding" in [to_show/README.md](to_show/README.md). `build_surrogates.bat` builds the C++ surrogate programs: it downloads OpenNN from GitHub and builds it with them (Windows, Visual Studio 2022 or later with the C++ workload; about 15 minutes the first time). `OPENNN_SOURCE_DIR` points it at another OpenNN source tree. Generating WaterTAP data takes from tens of minutes to hours of CPU. The generation scripts save as they go and take worker counts and time limits.
 
 ## Conventions
 
@@ -51,3 +51,4 @@ Follow "Retraining and rebuilding" in [to_show/README.md](to_show/README.md). Th
 | `bsm2_dynamic/` | The plan for the dynamic benchmark |
 | `to_show/` | The demo: the built page, `src/`, `simulator/server.py`, `tools/`, the retrained networks (`models/`), the browser weights (`weights/`) and the WaterTAP-verified points (`data/`) |
 | `setup.bat`, `setup.sh`, `start_demo.*`, `environment.yml`, `requirements.txt` | Setup and launch |
+| `CMakeLists.txt`, `build_surrogates.bat` | Building the two C++ trainers with OpenNN |

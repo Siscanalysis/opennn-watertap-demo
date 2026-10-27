@@ -171,7 +171,7 @@ A point no one could predict, such as a slider just moved, still takes one Water
 
 ## Retraining and rebuilding
 
-The page is built from `src/` (`index.html`, `style.css`, `model.js`, `app.js`) and the data in `weights/`, `data/` and `models/`. From this folder, in the `watertap` conda environment (the surrogate programs are `..\model\ro_surrogate.exe` and `..\bsm2_steady\model\bsm2_surrogate.exe`):
+The page is built from `src/` (`index.html`, `style.css`, `model.js`, `app.js`) and the data in `weights/`, `data/` and `models/`. From this folder, in the `watertap` conda environment (the surrogate programs are `..\model\ro_surrogate.exe` and `..\bsm2_steady\model\bsm2_surrogate.exe`, which `..\build_surrogates.bat` builds with OpenNN; see the [main README](../README.md#setup)):
 
 ```
 python tools/more_simulations.py ro 600
@@ -210,7 +210,7 @@ python tools/run_storm.py --until=19:45                    training, optima and 
 python tools/build_dashboard.py                            the page carries the storm network once it exists
 ```
 
-`run_storm.py` runs `prepare_rain_training.py` (the dry training set with no rain, the wet-weather simulations and, from the second round, the checked optima), trains two hidden layers of 32 or 48 neurons, exports the weights, sweeps the three objectives at four rain levels, solves the optima in WaterTAP and, if one misses a limit, starts a second round when there is time for it. `compare_rain.py` then writes `models/bsm2_rain/summary.txt` and `comparison.csv`. The `bsm2_surrogate.exe` for this pipeline must come from the same OpenNN commit as the dry network's (dev `31da51dbd`); `bsm2_steady/model/build.bat` takes `OPENNN_SRC`, `OPENNN_DEPS`, `OPENNN_LIB` and `EIGEN_SRC` for a build kept elsewhere.
+`run_storm.py` runs `prepare_rain_training.py` (the dry training set with no rain, the wet-weather simulations and, from the second round, the checked optima), trains two hidden layers of 32 or 48 neurons, exports the weights, sweeps the three objectives at four rain levels, solves the optima in WaterTAP and, if one misses a limit, starts a second round when there is time for it. `compare_rain.py` then writes `models/bsm2_rain/summary.txt` and `comparison.csv`. The networks on the page were made with OpenNN dev `31da51dbd`; to rebuild the storm network next to the dry one exactly, build `bsm2_surrogate.exe` from that OpenNN with `OPENNN_SOURCE_DIR` (`..\build_surrogates.bat`).
 
 | Step | What it does | Time |
 |---|---|---|
