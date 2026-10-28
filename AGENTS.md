@@ -33,7 +33,7 @@ From the repository root:
 
 ## Retrain and recompute
 
-Follow "Retraining and rebuilding" in [to_show/README.md](to_show/README.md). `build_surrogates.bat` builds the C++ surrogate programs: it downloads OpenNN from GitHub and builds it with them (Windows, Visual Studio 2022 or later with the C++ workload; about 15 minutes the first time). `OPENNN_SOURCE_DIR` points it at another OpenNN source tree. Generating WaterTAP data takes from tens of minutes to hours of CPU. The generation scripts save as they go and take worker counts and time limits.
+Follow "Retraining and rebuilding" in [to_show/README.md](to_show/README.md). `build_surrogates.bat` builds the C++ surrogate programs: it downloads OpenNN from GitHub and builds it with them (Windows, Visual Studio 2022 or later with the C++ workload; about 10 minutes the first time). Built that way, the trainers retrain the page's desalination and dry-weather networks bit for bit. `OPENNN_SOURCE_DIR` points it at another OpenNN source tree. Generating WaterTAP data takes from tens of minutes to hours of CPU. The generation scripts save as they go and take worker counts and time limits.
 
 ## Conventions
 

@@ -210,7 +210,7 @@ python tools/run_storm.py --until=19:45                    training, optima and 
 python tools/build_dashboard.py                            the page carries the storm network once it exists
 ```
 
-`run_storm.py` runs `prepare_rain_training.py` (the dry training set with no rain, the wet-weather simulations and, from the second round, the checked optima), trains two hidden layers of 32 or 48 neurons, exports the weights, sweeps the three objectives at four rain levels, solves the optima in WaterTAP and, if one misses a limit, starts a second round when there is time for it. `compare_rain.py` then writes `models/bsm2_rain/summary.txt` and `comparison.csv`. The networks on the page were made with OpenNN dev `31da51dbd`; to rebuild the storm network next to the dry one exactly, build `bsm2_surrogate.exe` from that OpenNN with `OPENNN_SOURCE_DIR` (`..\build_surrogates.bat`).
+`run_storm.py` runs `prepare_rain_training.py` (the dry training set with no rain, the wet-weather simulations and, from the second round, the checked optima), trains two hidden layers of 32 or 48 neurons, exports the weights, sweeps the three objectives at four rain levels, solves the optima in WaterTAP and, if one misses a limit, starts a second round when there is time for it. `compare_rain.py` then writes `models/bsm2_rain/summary.txt` and `comparison.csv`. The networks on the page were made with OpenNN dev `31da51dbd`, which is not on GitHub; OpenNN 26.0.3, which `..\build_surrogates.bat` downloads, retrains the dry-weather networks bit for bit and gives the storm network the same validation predictions (see the [main README](../README.md#setup)).
 
 | Step | What it does | Time |
 |---|---|---|

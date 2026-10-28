@@ -3,7 +3,7 @@ rem Builds the OpenNN trainers from zero: model\ro_surrogate.exe and bsm2_steady
 rem OpenNN is downloaded from GitHub (the commit in CMakeLists.txt) and built with them, unless
 rem OPENNN_SOURCE_DIR names an OpenNN source tree. Needs Visual Studio 2022 or later, or its Build
 rem Tools, with the "Desktop development with C++" workload, which brings CMake and Ninja. The first
-rem build takes about 15 minutes, most of it OpenNN; later builds redo only what changed.
+rem build takes about 10 minutes, most of it OpenNN; later builds redo only what changed.
 rem
 rem   build_surrogates.bat [--target ro_surrogate or bsm2_surrogate]
 rem

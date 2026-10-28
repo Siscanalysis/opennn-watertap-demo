@@ -54,7 +54,7 @@ The setup is the same as for the reverse osmosis toy: the environment from `..\s
 | Step | Command | Time (i7-8550U) |
 |---|---|---|
 | Dataset | `python generate_dataset.py 800 6 20` | 1 h 54 min |
-| Build | `model\build.bat` | about 15 min the first time (OpenNN), then 1 min |
+| Build | `model\build.bat` | about 10 min the first time (OpenNN), then 1 min |
 | Train | `bsm2_surrogate train <root> [dataset file]` | 5 s |
 | Optimize | `bsm2_surrogate optimize <root>` | 4 min |
 | Check in WaterTAP | `python verify_optima.py 6` | 25 min |
